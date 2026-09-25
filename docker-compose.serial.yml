@@ -1,0 +1,15 @@
+# Runs the serial bridge against the real ESP32 gateway instead of the
+# simulator. Usage:
+#
+#   SERIAL_DEVICE=/dev/ttyUSB0 docker compose \
+#     -f docker-compose.yml -f docker-compose.serial.yml up -d serial-bridge
+#
+# The host device must exist before the container starts.
+services:
+  serial-bridge:
+    devices:
+      - "${SERIAL_DEVICE:-/dev/ttyUSB0}:${SERIAL_DEVICE:-/dev/ttyUSB0}"
+    environment:
+      SIMULATE: "false"
+      SERIAL_PORT: "${SERIAL_DEVICE:-/dev/ttyUSB0}"
+      SERIAL_BAUDRATE: "115200"

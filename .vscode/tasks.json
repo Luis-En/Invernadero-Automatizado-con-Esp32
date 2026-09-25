@@ -1,0 +1,206 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Firmware: build field",
+      "type": "shell",
+      "command": "pio run -e field",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: build field (bench)",
+      "type": "shell",
+      "command": "pio run -e field_bench",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: build+upload field (real sensor, fast telemetry)",
+      "type": "shell",
+      "command": "pio run -e field_bringup -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: monitor field",
+      "type": "shell",
+      "command": "pio device monitor -e field_bringup",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Bring-up: monitor gateway",
+      "type": "shell",
+      "command": "pio device monitor -e gateway",
+      "options": { "cwd": "${workspaceFolder}/firmware/gateway" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Bring-up: monitor camera",
+      "type": "shell",
+      "command": "pio device monitor -e camera",
+      "options": { "cwd": "${workspaceFolder}/firmware/camera" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: upload field",
+      "type": "shell",
+      "command": "pio run -e field -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: build gateway",
+      "type": "shell",
+      "command": "pio run -e gateway",
+      "options": { "cwd": "${workspaceFolder}/firmware/gateway" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: build gateway (sim)",
+      "type": "shell",
+      "command": "pio run -e gateway_sim",
+      "options": { "cwd": "${workspaceFolder}/firmware/gateway" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: upload gateway",
+      "type": "shell",
+      "command": "pio run -e gateway -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/gateway" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: build camera",
+      "type": "shell",
+      "command": "pio run -e camera",
+      "options": { "cwd": "${workspaceFolder}/firmware/camera" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: upload camera",
+      "type": "shell",
+      "command": "pio run -e camera -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/camera" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: build all",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Firmware: build field",
+        "Firmware: build gateway",
+        "Firmware: build camera"
+      ]
+    },
+    {
+      "label": "Bring-up: build ESP8266 field (soil A0)",
+      "type": "shell",
+      "command": "pio run -e field",
+      "options": { "cwd": "${workspaceFolder}/firmware/bringup/esp8266_field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: upload ESP8266 field (soil A0)",
+      "type": "shell",
+      "command": "pio run -e field -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/bringup/esp8266_field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: build ESP8266 gateway",
+      "type": "shell",
+      "command": "pio run -e gateway",
+      "options": { "cwd": "${workspaceFolder}/firmware/bringup/esp8266_gateway" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: upload ESP8266 gateway",
+      "type": "shell",
+      "command": "pio run -e gateway -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/bringup/esp8266_gateway" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Bring-up: build field photo UART test (ESP32)",
+      "type": "shell",
+      "command": "pio run -e field_photo_test -t upload",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: field logic tests (host)",
+      "type": "shell",
+      "command": "bash tools/run_logic_tests.sh",
+      "options": { "cwd": "${workspaceFolder}/firmware/field" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Firmware: gateway payload validation",
+      "type": "shell",
+      "command": "bash scripts/check_payloads.sh",
+      "options": { "cwd": "${workspaceFolder}/firmware/gateway" },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: run tests",
+      "type": "shell",
+      "command": "python -m pytest tests -q",
+      "options": { "cwd": "${workspaceFolder}/backend/api" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: dev server",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: lint",
+      "type": "shell",
+      "command": "npm run lint",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "Docker: up",
+      "type": "shell",
+      "command": "docker compose up -d --build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: down",
+      "type": "shell",
+      "command": "docker compose down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: logs",
+      "type": "shell",
+      "command": "docker compose logs -f",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

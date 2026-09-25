@@ -1,0 +1,35 @@
+{
+  "platformio-ide.useBuiltinPIOCore": true,
+  "platformio-ide.autoRebuildAutocompleteIndex": true,
+  "C_Cpp.default.cppStandard": "gnu++17",
+  "C_Cpp.default.cStandard": "gnu11",
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+  "C_Cpp.errorSquiggles": "enabled",
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/api/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend/api",
+    "${workspaceFolder}/backend/serial_bridge"
+  ],
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests"],
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pio": true,
+    "**/node_modules": true
+  },
+  "files.watcherExclude": {
+    "**/.pio/**": true,
+    "**/node_modules/**": true,
+    "**/__pycache__/**": true,
+    "**/data/photos/**": true
+  },
+  "search.exclude": {
+    "**/.pio": true,
+    "**/node_modules": true,
+    "**/dist": true
+  },
+  "eslint.workingDirectories": ["frontend"],
+  "editor.rulers": [100],
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}

@@ -1,0 +1,54 @@
+# Actuator Hardware Abstraction Layer Configuration
+# Map logical actuators to physical pins and types
+# This file is read by firmware and serial-bridge for simulation
+
+actuators:
+  fan_1:
+    pin: 16
+    active_high: true
+    type: "relay"
+    max_on_seconds: 7200
+    description: "Ventilador 1 - 35W 110VAC via relay"
+    safety_note: "Requires contactor for production. Using relay module for prototype only."
+
+  fan_2:
+    pin: 17
+    active_high: true
+    type: "relay"
+    max_on_seconds: 7200
+    description: "Ventilador 2 - 35W 110VAC via relay"
+
+  humidifier_1:
+    pin: 18
+    active_high: true
+    type: "mosfet"
+    max_on_seconds: 7200
+    description: "Humidificador 1 - 24VDC 800mA via MOSFET"
+
+  humidifier_2:
+    pin: 19
+    active_high: true
+    type: "mosfet"
+    max_on_seconds: 7200
+    description: "Humidificador 2 - 24VDC 800mA via MOSFET"
+
+  pump:
+    pin: 21
+    active_high: true
+    type: "relay"
+    max_on_seconds: 900
+    description: "Bomba 0.5HP 110VAC - REQUIRES CONTACTOR FOR PRODUCTION"
+    safety_note: "Inrush current 12-18A. Relay module rated 10A WILL FAIL. Use SSR-40DA + 15A breaker + 12AWG cable."
+    enabled: false  # Disabled until water source verified
+
+# Hysteresis defaults (overridden by crop config)
+hysteresis_defaults:
+  temp:
+    on_above: 30.0
+    off_below: 27.5
+  humidity:
+    on_below: 60.0
+    off_above: 68.0
+  soil_moisture:
+    on_below_pct: 35
+    off_above_pct: 45

@@ -1,0 +1,35 @@
+{
+  "folders": [
+    { "name": "Firmware (PlatformIO)", "path": "firmware" },
+    { "name": "Field node", "path": "firmware/field" },
+    { "name": "Gateway", "path": "firmware/gateway" },
+    { "name": "Camera", "path": "firmware/camera" },
+    { "name": "Backend API", "path": "backend/api" },
+    { "name": "Serial bridge", "path": "backend/serial_bridge" },
+    { "name": "Frontend", "path": "frontend" },
+    { "name": "Project root", "path": "." }
+  ],
+  "settings": {
+    "files.associations": {
+      "*.h": "cpp",
+      "*.cpp": "cpp",
+      "platformio.ini": "ini"
+    },
+    "editor.formatOnSave": false,
+    "editor.rulers": [100]
+  },
+  "extensions": {
+    "recommendations": [
+      "platformio.platformio-ide",
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "ms-python.debugpy",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "redhat.vscode-yaml",
+      "ms-azuretools.vscode-docker",
+      "bierner.markdown-mermaid",
+      "humao.rest-client"
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+services:
+  api:
+    build:
+      context: ./backend/api
+      dockerfile: Dockerfile
+    container_name: greenhouse-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backend/api:/app/app
+      - ./config:/app/config
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/greenhouse.db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme}
+      - JWT_ALGORITHM=HS256
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
+      - PHOTO_STORAGE_PATH=/app/data/photos
+      - PHOTO_MAX_SIZE_MB=5
+      - PHOTO_RETENTION_DAYS=30
+
+  serial-bridge:
+    build:
+      context: ./backend/serial_bridge
+      dockerfile: Dockerfile
+    container_name: greenhouse-serial
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./backend/serial_bridge:/app
+      - ./config:/app/config
+    environment:
+      - SERIAL_PORT=/dev/ttyUSB0
+      - SERIAL_BAUDRATE=115200
+      - SIMULATE=true
+      - SIM_TELEMETRY_INTERVAL_SEC=30
+      - SIM_PHOTO_INTERVAL_MIN=30
+      - SIM_FIRST_PHOTO_DELAY_SEC=30
+      - API_URL=http://api:8000
+    depends_on:
+      - api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: greenhouse-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000/api/config/ws
+    depends_on:
+      - api
+
+volumes:
+  greenhouse_data:

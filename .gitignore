@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+.env.local
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+build/
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Data
+data/photos/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# IDE
+# .vscode is tracked so the team shares tasks/launch/extensions.
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Local tooling
+.openchamber/
+*.code-workspace.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PlatformIO
+.pio/
+.pioenvs/
+
+# Secrets
+*.key
+*.pem
+secrets/

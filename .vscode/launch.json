@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "cwd": "${workspaceFolder}/backend/api",
+      "envFile": "${workspaceFolder}/.env",
+      "python": "${workspaceFolder}/backend/api/.venv/bin/python",
+      "justMyCode": true,
+      "preLaunchTask": "Docker: up"
+    },
+    {
+      "name": "Backend: pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests", "-q"],
+      "cwd": "${workspaceFolder}/backend/api",
+      "python": "${workspaceFolder}/backend/api/.venv/bin/python",
+      "justMyCode": false
+    },
+    {
+      "name": "Serial bridge: simulator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/serial_bridge/bridge.py",
+      "cwd": "${workspaceFolder}/backend/serial_bridge",
+      "env": {
+        "SIMULATE": "true",
+        "API_URL": "http://localhost:8000"
+      },
+      "python": "${workspaceFolder}/backend/api/.venv/bin/python"
+    },
+    {
+      "name": "Frontend: Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend/src"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Backend + Frontend",
+      "configurations": ["Backend: FastAPI (uvicorn)", "Frontend: Chrome"]
+    }
+  ]
+}
