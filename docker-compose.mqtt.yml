@@ -1,0 +1,18 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+  api:
+    environment:
+      - MQTT_ENABLED=true
+      - MQTT_HOST=mqtt
+      - MQTT_PORT=1883
+      - MQTT_DEVICE_ID=field_esp32
+      - MQTT_TOPIC_PREFIX=invernadero
+      - MQTT_TIMEOUT_SECONDS=5
+    depends_on:
+      - mqtt
