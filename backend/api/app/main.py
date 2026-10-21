@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
-from app.routes import auth, crops, config, photos, events
+from app.routes import auth, crops, config, photos, events, actuators
 from app import seed
 
 
@@ -31,6 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(actuators.router)
 app.include_router(auth.router)
 app.include_router(crops.router)
 app.include_router(config.router)
