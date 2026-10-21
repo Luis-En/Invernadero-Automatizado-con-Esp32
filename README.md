@@ -1,3 +1,5 @@
+> **Control MQTT agregado:** ver [docs/mqtt.md](docs/mqtt.md) para configurar los botones y el ESP32.
+
 # Invernadero Automatizado - Santa Lucía Cotzumalguapa, Guatemala
 
 Sistema completo de monitoreo y automatización para invernadero 19m x 4m con Raspberry Pi 5, ESP32 y sensores IoT.
