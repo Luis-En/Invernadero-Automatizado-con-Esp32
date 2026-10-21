@@ -9,6 +9,7 @@
 #include "persistence.h"
 #include "protocol.h"
 #include "sensors.h"
+#include "mqtt_link.h"
 #include "wifi_photo.h"
 
 namespace {
@@ -21,6 +22,10 @@ uint32_t boot_ms = 0;
 uint32_t last_sample_ms = 0;
 uint32_t last_telemetry_ms = 0;
 uint32_t last_hello_ms = 0;
+
+bool mqtt_active[ACT_COUNT] = {};
+bool mqtt_values[ACT_COUNT] = {};
+uint32_t mqtt_on_since[ACT_COUNT] = {};
 
 bool manual_override_active = false;
 bool manual_values[ACT_COUNT] = {false, false, false, false, false};
@@ -36,6 +41,7 @@ void applyNewConfig(const RuntimeConfig& config) {
   manual_override_active = false;
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
     manual_values[i] = false;
+    mqtt_active[i] = false;
   }
 }
 
@@ -49,10 +55,33 @@ void applyManualOverride(const bool values[ACT_COUNT]) {
 void runControlCycle(uint32_t now_ms) {
   computeActuatorStates(runtime_config, latest_snapshot, actuator_state, now_ms,
                         manual_override_active, manual_values);
+  // MQTT overrides only the selected output, with local irrigation interlock
+  // and continuous-ON limits. A config change clears these manual overrides.
+  for (uint8_t i = 0; i < ACT_COUNT; ++i) {
+    if (!mqtt_active[i]) continue;
+    const uint32_t limit = i == ACT_PUMP ? runtime_config.max_on_pump_s
+        : (i <= ACT_FAN_2 ? runtime_config.max_on_fan_s : runtime_config.max_on_humidifier_s);
+    if ((i == ACT_PUMP && !runtime_config.irrigation_enabled) ||
+        (mqtt_values[i] && limit && now_ms - mqtt_on_since[i] >= limit * 1000UL)) {
+      mqtt_values[i] = false;
+    }
+    actuator_state.set(i, mqtt_values[i]);
+  }
   actuators.apply(actuator_state);
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
     last_outputs[i] = actuators.outputState(i);
   }
+}
+
+bool applyMqttCommand(uint8_t index, bool state) {
+  if (index >= ACT_COUNT || (index == ACT_PUMP && state && !runtime_config.irrigation_enabled)) return false;
+  if (state && (!mqtt_active[index] || !mqtt_values[index])) mqtt_on_since[index] = millis();
+  mqtt_active[index] = true;
+  mqtt_values[index] = state;
+  runControlCycle(millis());
+  // Request fresh telemetry on the next loop, in addition to the direct ACK.
+  last_telemetry_ms = millis() - FIELD_TELEMETRY_INTERVAL_MS;
+  return actuators.outputState(index) == state;
 }
 
 TelemetryData buildTelemetry(uint32_t now_ms) {
@@ -134,6 +163,8 @@ void setup() {
     Serial.println("[field] ESP-NOW init failed");
   }
 
+  mqttBegin(applyMqttCommand);
+
   // Prime the snapshot so the first control cycle has data.
   sensors.read(latest_snapshot);
   runControlCycle(millis());
@@ -148,6 +179,7 @@ void loop() {
 
   // 1. Inbound commands / config pushes.
   fieldLink.poll(now_ms);
+  mqttPoll(now_ms);
 
   // 2. Serve the camera's Wi-Fi photo uploads and forward them to the gateway.
   wifiPhoto.poll();
