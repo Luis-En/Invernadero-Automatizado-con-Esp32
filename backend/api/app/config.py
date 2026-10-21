@@ -13,10 +13,20 @@ class Settings(BaseSettings):
     PHOTO_STORAGE_PATH: str = "./data/photos"
     PHOTO_MAX_SIZE_MB: int = 5
     PHOTO_RETENTION_DAYS: int = 30
+    MQTT_ENABLED: bool = False
+    MQTT_HOST: str = "localhost"
+    MQTT_PORT: int = 1883
+    MQTT_USERNAME: str = ""
+    MQTT_PASSWORD: str = ""
+    MQTT_TLS: bool = False
+    MQTT_DEVICE_ID: str = "field_esp32"
+    MQTT_TOPIC_PREFIX: str = "invernadero"
+    MQTT_TIMEOUT_SECONDS: float = 5.0
     # Anchor for relative sqlite/photo paths when running from /app/app in Docker.
     APP_ROOT: str = "/app"
 
     class Config:
+        extra = "ignore"  # Root .env also contains serial/frontend settings.
         env_file = ".env"
         env_file_encoding = "utf-8"
 
