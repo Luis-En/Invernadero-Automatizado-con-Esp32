@@ -34,7 +34,7 @@ services:
     environment:
       - SERIAL_PORT=/dev/ttyUSB0
       - SERIAL_BAUDRATE=115200
-      - SIMULATE=true
+      - SIMULATE=${SIMULATE:-true}
       - SIM_TELEMETRY_INTERVAL_SEC=30
       - SIM_PHOTO_INTERVAL_MIN=30
       - SIM_FIRST_PHOTO_DELAY_SEC=30
