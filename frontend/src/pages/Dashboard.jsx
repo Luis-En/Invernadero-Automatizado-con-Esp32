@@ -11,6 +11,7 @@ export function Dashboard() {
   const { isAdmin } = useAuth()
   const [actuatorLoading, setActuatorLoading] = useState(null)
   const [error, setError] = useState('')
+  const [confirmed, setConfirmed] = useState({})
   const [latestPhoto, setLatestPhoto] = useState(null)
 
   useEffect(() => {
@@ -32,13 +33,10 @@ export function Dashboard() {
     setActuatorLoading(actuator)
     setError('')
     try {
-      const active = await api.getActiveConfig()
-      const current = active?.config_json || {}
-      const manual = { ...(current.manual_override || {}), [actuator]: newState }
-      await api.applyConfig({
-        config_json: { ...current, manual_override: manual },
-        crop_id: active?.crop_id ?? null,
-      })
+      const ack = await api.commandActuator(actuator, newState)
+      setConfirmed(previous => ({ ...previous, [actuator]: {
+        state: ack.state, confirmedAt: Date.parse(ack.confirmed_at),
+      } }))
       refresh()
     } catch (e) {
       console.error('Failed to toggle actuator:', e)
@@ -47,6 +45,16 @@ export function Dashboard() {
       setActuatorLoading(null)
     }
   }, [isAdmin, refresh])
+
+  const actuatorState = name => {
+    const ack = confirmed[name]
+    const rawTimestamp = telemetry?.last_update || telemetry?.timestamp
+    const telemetryAt = rawTimestamp
+      ? Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(rawTimestamp) ? rawTimestamp : `${rawTimestamp}Z`)
+      : 0
+    return ack && !(telemetryAt > ack.confirmedAt)
+      ? ack.state : Boolean(telemetry?.actuators?.[name])
+  }
 
   const getSoilStatus = (pct, ok) => {
     if (!ok || pct === null) return 'offline'
@@ -185,9 +193,9 @@ export function Dashboard() {
             key={a.actuator}
             name={a.name}
             icon={a.icon}
-            state={telemetry.actuators?.[a.actuator]}
-            onToggle={() => toggleActuator(a.actuator, !telemetry.actuators?.[a.actuator])}
-            disabled={!isAdmin}
+            state={actuatorState(a.actuator)}
+            onToggle={() => toggleActuator(a.actuator, !actuatorState(a.actuator))}
+            disabled={!isAdmin || actuatorLoading !== null}
             loading={actuatorLoading === a.actuator}
           />
         ))}
@@ -195,9 +203,9 @@ export function Dashboard() {
         <ActuatorCard
           name="Bomba de Riego"
           icon="🚿"
-          state={telemetry.actuators?.pump}
-          onToggle={() => toggleActuator('pump', !telemetry.actuators?.pump)}
-          disabled={!isAdmin || !status?.irrigation_enabled}
+          state={actuatorState('pump')}
+          onToggle={() => toggleActuator('pump', !actuatorState('pump'))}
+          disabled={!isAdmin || actuatorLoading !== null || (!status?.irrigation_enabled && !actuatorState('pump'))}
           loading={actuatorLoading === 'pump'}
         />
 
