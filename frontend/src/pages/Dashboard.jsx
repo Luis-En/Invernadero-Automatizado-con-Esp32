@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useTelemetry } from '../context/TelemetryContext'
 import { useAuth } from '../context/AuthContext'
 import { SensorCard, ActuatorCard } from '../components/SensorCard'
+import { WeatherSummary } from '../components/WeatherSummary'
 import { MultiChart } from '../components/Charts'
 import { api } from '../api'
 import { format } from 'date-fns'
@@ -159,6 +160,8 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      <WeatherSummary />
 
       <div className="grid grid-6" style={{ marginBottom: '1.5rem' }}>
         {soilSensors.map(sensor => (

@@ -13,6 +13,19 @@ class Settings(BaseSettings):
     PHOTO_STORAGE_PATH: str = "./data/photos"
     PHOTO_MAX_SIZE_MB: int = 5
     PHOTO_RETENTION_DAYS: int = 30
+    # Weather (OpenWeather). The key stays server-side; the frontend only
+    # talks to /api/weather.
+    OPENWEATHER_API_KEY: str = ""
+    WEATHER_ENABLED: bool = True
+    WEATHER_LAT: float = 14.3333
+    WEATHER_LON: float = -91.0167
+    WEATHER_LOCATION_NAME: str = "Santa Lucía Cotzumalguapa"
+    WEATHER_UNITS: str = "metric"
+    WEATHER_LANG: str = "es"
+    WEATHER_CACHE_TTL_SEC: int = 600
+    WEATHER_STALE_MAX_SEC: int = 7200
+    WEATHER_TIMEOUT_SEC: float = 8.0
+
     # Anchor for relative sqlite/photo paths when running from /app/app in Docker.
     APP_ROOT: str = "/app"
 

@@ -6,6 +6,15 @@
 
 FieldLink fieldLink;
 
+namespace {
+constexpr uint8_t kFieldRole =
+#if FIELD_ROLE_SECONDARY
+    ROLE_FIELD_SECONDARY;
+#else
+    ROLE_FIELD;
+#endif
+}  // namespace
+
 void FieldLink::begin(ConfigAppliedCallback on_config) {
   config_callback_ = on_config;
   resetConfigAssembly();
@@ -40,13 +49,13 @@ void FieldLink::sendHello(uint32_t now_ms) {
   msg.hdr.type = MSG_HELLO;
   memcpy(msg.hdr.src, espNow.ownMac(), 6);
   msg.hdr.seq = espNow.nextSeq();
-  msg.role = ROLE_FIELD;
+  msg.role = kFieldRole;
   msg.fw_major = FIELD_FW_VERSION_MAJOR;
   msg.fw_minor = FIELD_FW_VERSION_MINOR;
   msg.fw_patch = FIELD_FW_VERSION_PATCH;
   msg.uptime_s = now_ms / 1000UL;
   copyDeviceId(msg.device_id, sizeof(msg.device_id));
-  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
+  sendToGateway((const uint8_t*)&msg, sizeof(msg));
 }
 
 void FieldLink::sendTelemetry(const TelemetryData& telemetry) {
@@ -95,9 +104,10 @@ void FieldLink::sendTelemetry(const TelemetryData& telemetry) {
   msg.actuator_mask = act_mask;
   msg.rssi = telemetry.rssi;
 
-  // Send to the gateway. If the gateway MAC is unknown, broadcast so it is
-  // discovered and can reply with a command.
-  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
+  // Send to the gateway. Unicast once its MAC is known: ESP-NOW then ACKs and
+  // retransmits each frame, which is what stops photo fragments from vanishing
+  // at 50 m. Before discovery it broadcasts.
+  sendToGateway((const uint8_t*)&msg, sizeof(msg));
 }
 
 void FieldLink::sendAck(uint16_t ack_seq, uint8_t command, uint16_t version, uint8_t status) {
@@ -112,7 +122,7 @@ void FieldLink::sendAck(uint16_t ack_seq, uint8_t command, uint16_t version, uin
   msg.cmd = command;
   msg.version = version;
   msg.status = status;
-  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
+  sendToGateway((const uint8_t*)&msg, sizeof(msg));
 }
 
 void FieldLink::sendEvent(uint8_t severity, const char* code, const char* message) {
@@ -124,10 +134,17 @@ void FieldLink::sendEvent(uint8_t severity, const char* code, const char* messag
   memcpy(msg.hdr.src, espNow.ownMac(), 6);
   msg.hdr.seq = espNow.nextSeq();
   msg.severity = severity;
-  msg.role = ROLE_FIELD;
+  msg.role = kFieldRole;
   strncpy(msg.code, code != nullptr ? code : "", sizeof(msg.code) - 1);
   strncpy(msg.message, message != nullptr ? message : "", sizeof(msg.message) - 1);
-  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
+  sendToGateway((const uint8_t*)&msg, sizeof(msg));
+}
+
+bool FieldLink::sendToGateway(const uint8_t* data, size_t length) {
+  if (gateway_known_) {
+    return espNow.send(gateway_mac_, data, length);
+  }
+  return espNow.sendBroadcast(data, length);
 }
 
 void FieldLink::syncEpoch(uint32_t epoch) {
@@ -153,6 +170,16 @@ void FieldLink::handleFrame(const EspNowMessage& frame) {
     return;
   }
   if (header.type == MSG_COMMAND && frame.length >= sizeof(CommandMsg)) {
+    // Every command we receive comes from the gateway. Remember its MAC so
+    // telemetry and photo fragments can go unicast (ESP-NOW ACK + retries)
+    // instead of broadcast (fire and forget).
+    if (!gateway_known_ || memcmp(gateway_mac_, frame.mac, 6) != 0) {
+      memcpy(gateway_mac_, frame.mac, 6);
+      gateway_known_ = true;
+      Serial.printf("[link] gateway MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    frame.mac[0], frame.mac[1], frame.mac[2], frame.mac[3],
+                    frame.mac[4], frame.mac[5]);
+    }
     CommandMsg msg;
     memcpy(&msg, frame.data, sizeof(msg));
     handleCommand(msg);

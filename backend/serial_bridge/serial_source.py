@@ -74,6 +74,15 @@ class SerialSource:
         while not self._stop.is_set():
             try:
                 with serial.Serial(self._port, self._baudrate, timeout=1) as port:
+                    # Release the modem control lines: some USB-serial adapters
+                    # hold the ESP32 in reset while DTR/RTS are asserted, which
+                    # would stop the node from running the moment the bridge
+                    # opens the port.
+                    try:
+                        port.dtr = False
+                        port.rts = False
+                    except (OSError, serial.SerialException):
+                        pass
                     logger.info("gateway connected on %s @ %d baud", self._port, self._baudrate)
                     with self._serial_lock:
                         self._serial = port

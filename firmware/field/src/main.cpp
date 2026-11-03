@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ctype.h>
 
 #include "actuators.h"
 #include "automation.h"
@@ -9,6 +10,7 @@
 #include "persistence.h"
 #include "protocol.h"
 #include "sensors.h"
+#include "usb_telemetry.h"
 #include "wifi_photo.h"
 
 namespace {
@@ -47,12 +49,16 @@ void applyManualOverride(const bool values[ACT_COUNT]) {
 }
 
 void runControlCycle(uint32_t now_ms) {
+#if FIELD_HAS_ACTUATORS
   computeActuatorStates(runtime_config, latest_snapshot, actuator_state, now_ms,
                         manual_override_active, manual_values);
   actuators.apply(actuator_state);
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
     last_outputs[i] = actuators.outputState(i);
   }
+#else
+  (void)now_ms;
+#endif
 }
 
 TelemetryData buildTelemetry(uint32_t now_ms) {
@@ -101,6 +107,86 @@ void printStatus(const SensorSnapshot& snapshot, const bool outputs[ACT_COUNT]) 
                 manual_override_active ? " (manual)" : "");
 }
 
+// -----------------------------------------------------------------------------
+// Serial calibration commands (USB serial, 115200):
+//   CAL SHOW        print each slot's dry/wet ADC
+//   CAL DRY <slot>  capture the current ADC as the dry point
+//   CAL WET <slot>  capture the current ADC as the wet point
+//   CAL SAVE        persist all slots to NVS
+//   CAL RESET       restore the 3.3 V defaults (then CAL SAVE)
+// Slots are A1,A2,A3,B1,B2,B3 = 0..5. Only the slots in FIELD_SOIL_MASK are
+// sampled in telemetry; calibration works on any slot.
+void printCalibration() {
+  static const char* const labels[SOIL_SENSOR_COUNT] = {"A1", "A2", "A3",
+                                                        "B1", "B2", "B3"};
+  for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
+    const SensorManager::Calibration& cal = sensors.calibration(i);
+    Serial.printf("[cal] %s dry=%u wet=%u\n", labels[i], cal.dry_adc, cal.wet_adc);
+  }
+}
+
+void handleCalibrationLine(char* line) {
+  for (char* p = line; *p != '\0'; p++) {
+    *p = (char)toupper((unsigned char)*p);
+  }
+
+  if (strncmp(line, "CAL SHOW", 8) == 0) {
+    printCalibration();
+    return;
+  }
+  if (strncmp(line, "CAL SAVE", 8) == 0) {
+    sensors.saveCalibration();
+    Serial.println("[cal] saved to NVS");
+    return;
+  }
+  if (strncmp(line, "CAL RESET", 9) == 0) {
+    sensors.resetCalibration();
+    Serial.println("[cal] reset to 3.3 V defaults (run CAL SAVE to persist)");
+    return;
+  }
+
+  int slot = -1;
+  if (sscanf(line, "CAL DRY %d", &slot) == 1) {
+    if (slot < 0 || slot >= SOIL_SENSOR_COUNT) {
+      Serial.println("[cal] slot must be 0..5");
+      return;
+    }
+    uint16_t adc = sensors.sampleRaw((uint8_t)slot);
+    sensors.setCalibration((uint8_t)slot, adc, sensors.calibration((uint8_t)slot).wet_adc);
+    Serial.printf("[cal] slot %d dry=%u\n", slot, adc);
+    return;
+  }
+  if (sscanf(line, "CAL WET %d", &slot) == 1) {
+    if (slot < 0 || slot >= SOIL_SENSOR_COUNT) {
+      Serial.println("[cal] slot must be 0..5");
+      return;
+    }
+    uint16_t adc = sensors.sampleRaw((uint8_t)slot);
+    sensors.setCalibration((uint8_t)slot, sensors.calibration((uint8_t)slot).dry_adc, adc);
+    Serial.printf("[cal] slot %d wet=%u\n", slot, adc);
+    return;
+  }
+
+  Serial.println("[cal] CAL SHOW | CAL DRY <0-5> | CAL WET <0-5> | CAL SAVE | CAL RESET");
+}
+
+void pollCalibrationCommands() {
+  static char line[64];
+  static size_t length = 0;
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (length > 0) {
+        line[length] = '\0';
+        handleCalibrationLine(line);
+        length = 0;
+      }
+    } else if (length < sizeof(line) - 1) {
+      line[length++] = c;
+    }
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -109,8 +195,10 @@ void setup() {
   boot_ms = millis();
 
   // Safety first: every output OFF before anything else can fail.
+#if FIELD_HAS_ACTUATORS
   actuators.begin();
   actuators.allOff();
+#endif
 
   persistence.begin();
   sensors.begin();
@@ -123,34 +211,54 @@ void setup() {
     runtime_config.irrigation_enabled = false;
   }
 
+#if !FIELD_CALIBRATION_ONLY
   fieldLink.begin(applyNewConfig);
   fieldLink.setManualOverrideCallback(applyManualOverride);
 
+#if FIELD_HAS_CAMERA_AP
   // The camera joins the AP this node raises, so the AP must be up first; it
   // also fixes the Wi-Fi channel ESP-NOW then uses.
   wifiPhoto.begin();
+#endif
 
-  if (!espNow.begin(FIELD_ESPNOW_CHANNEL, EspNowHal::MODE_KEEP_APSTA)) {
+  constexpr uint8_t kEspNowMode =
+#if FIELD_HAS_CAMERA_AP
+      EspNowHal::MODE_KEEP_APSTA;
+#else
+      EspNowHal::MODE_KEEP_STA;
+#endif
+
+  if (!espNow.begin(FIELD_ESPNOW_CHANNEL, kEspNowMode)) {
     Serial.println("[field] ESP-NOW init failed");
   }
+#endif
 
   // Prime the snapshot so the first control cycle has data.
   sensors.read(latest_snapshot);
   runControlCycle(millis());
   printStatus(latest_snapshot, last_outputs);
 
+#if !FIELD_CALIBRATION_ONLY
   fieldLink.sendHello(millis());
   last_hello_ms = millis();
+#endif
 }
 
 void loop() {
   const uint32_t now_ms = millis();
 
+  // 0. Serial calibration commands (CAL ...).
+  pollCalibrationCommands();
+
+#if !FIELD_CALIBRATION_ONLY
   // 1. Inbound commands / config pushes.
   fieldLink.poll(now_ms);
 
+#if FIELD_HAS_CAMERA_AP
   // 2. Serve the camera's Wi-Fi photo uploads and forward them to the gateway.
   wifiPhoto.poll();
+#endif
+#endif
 
   // 3. Sample sensors on their interval.
   if (now_ms - last_sample_ms >= FIELD_SAMPLE_INTERVAL_MS) {
@@ -160,12 +268,16 @@ void loop() {
     printStatus(latest_snapshot, last_outputs);
   }
 
+#if !FIELD_CALIBRATION_ONLY
   // 4. Publish telemetry. When the link is down this simply fails silently;
   //    the node keeps controlling the greenhouse with the stored config.
   if (now_ms - last_telemetry_ms >= FIELD_TELEMETRY_INTERVAL_MS) {
     last_telemetry_ms = now_ms;
     TelemetryData telemetry = buildTelemetry(now_ms);
     fieldLink.sendTelemetry(telemetry);
+    // Also publish on USB so the Pi bridge can read the field node directly,
+    // with or without a gateway in between.
+    usb_telemetry::emit(telemetry);
   }
 
   // 5. Announce presence so the gateway can discover/route to us.
@@ -173,6 +285,7 @@ void loop() {
     last_hello_ms = now_ms;
     fieldLink.sendHello(now_ms);
   }
+#endif
 
   delay(2);
 }

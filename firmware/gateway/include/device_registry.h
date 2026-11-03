@@ -22,6 +22,11 @@ class DeviceRegistry {
   void update(const uint8_t* mac, uint8_t role, const char* deviceId, int8_t rssi, uint32_t epoch);
 
   const DeviceRecord* findRole(uint8_t role) const;
+  // Role already learned for a MAC (ROLE_UNKNOWN if this peer is new).
+  uint8_t roleForMac(const uint8_t* mac) const;
+  // Refresh liveness/RSSI without changing the role. A photo forwarded by a
+  // field node must not relabel that field as the camera.
+  void touch(const uint8_t* mac, int8_t rssi);
   bool macForRole(uint8_t role, uint8_t* outMac) const;
   bool isOnline(uint8_t role, uint32_t nowMs, uint32_t timeoutMs) const;
   int8_t rssiForRole(uint8_t role) const;

@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { TelemetryProvider } from './context/TelemetryContext'
+import { WeatherProvider } from './context/WeatherContext'
 import { Layout } from './components/Layout'
 import { Dashboard } from './pages/Dashboard'
 import { Photos } from './pages/Photos'
@@ -8,6 +9,7 @@ import { History } from './pages/History'
 import { Events } from './pages/Events'
 import { Config } from './pages/Config'
 import { Crops } from './pages/Crops'
+import { Weather } from './pages/Weather'
 import { Login } from './pages/Login'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -45,6 +47,7 @@ function AppRoutes() {
         <Route path="/photos" element={<Photos />} />
         <Route path="/history" element={<History />} />
         <Route path="/events" element={<Events />} />
+        <Route path="/clima" element={<Weather />} />
         <Route path="/config" element={<ProtectedRoute adminOnly><Config /></ProtectedRoute>} />
         <Route path="/crops" element={<ProtectedRoute adminOnly><Crops /></ProtectedRoute>} />
       </Route>
@@ -57,7 +60,9 @@ function App() {
   return (
     <AuthProvider>
       <TelemetryProvider>
-        <AppRoutes />
+        <WeatherProvider>
+          <AppRoutes />
+        </WeatherProvider>
       </TelemetryProvider>
     </AuthProvider>
   )

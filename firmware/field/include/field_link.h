@@ -31,6 +31,13 @@ class FieldLink {
   void sendTelemetry(const TelemetryData& telemetry);
   void sendAck(uint16_t ack_seq, uint8_t command, uint16_t version, uint8_t status);
 
+  // Sends a raw frame to the gateway. Once the gateway MAC is known (learned
+  // from any command it sends us) this is a unicast send, which ESP-NOW
+  // acknowledges and retransmits at the link layer. Before that it falls back
+  // to broadcast so discovery still works.
+  bool sendToGateway(const uint8_t* data, size_t length);
+  bool gatewayKnown() const { return gateway_known_; }
+
   // Diagnostic event forwarded to the gateway (severity 0=info, 1=warning,
   // 2=critical). Used to surface camera status over the USB monitor.
   void sendEvent(uint8_t severity, const char* code, const char* message);
@@ -69,6 +76,9 @@ class FieldLink {
   uint32_t epoch_base_ms_ = 0;
 
   uint32_t last_hello_ms_ = 0;
+
+  uint8_t gateway_mac_[6] = {0};
+  bool gateway_known_ = false;
 };
 
 extern FieldLink fieldLink;

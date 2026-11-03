@@ -12,18 +12,45 @@ namespace {
 WebServer server(FIELD_PHOTO_TCP_PORT);
 uint16_t photo_sequence = 0;
 
-// Capacities for the HTTP layer. A VGA JPEG is ~30 KB and is uploaded as a
-// single POST body, so the server must accept a body larger than its default
-// 4 KB. WebServer stores it in the request's "plain" argument.
-constexpr size_t kHttpBufferBytes = FIELD_PHOTO_BUFFER_MAX;
+// Registers a handler that consumes the raw POST body (binary-safe) for the
+// camera's JPEG uploads. The stock `server.on()` handler loses the binary body
+// to a null-terminated String, so the photo must be read through HTTPRaw.
+class PhotoRawHandler : public RequestHandler {
+ public:
+  bool canHandle(HTTPMethod method, String uri) override {
+    return method == HTTP_POST && uri == "/photo";
+  }
+
+  bool canRaw(String uri) override {
+    (void)uri;
+    return true;
+  }
+
+  void raw(WebServer& server, String uri, HTTPRaw& raw) override {
+    (void)server;
+    (void)uri;
+    wifiPhoto.handleRaw(raw);
+  }
+
+  bool handle(WebServer& server, HTTPMethod method, String uri) override {
+    (void)method;
+    (void)uri;
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+    return true;
+  }
+};
+
+PhotoRawHandler photo_raw_handler;
 }  // namespace
 
 uint16_t WifiPhotoReceiver::nextSequence() { return ++photo_sequence; }
 
 void WifiPhotoReceiver::begin() {
-  buffer_ = (uint8_t*)malloc(kBufferMax);
-  if (buffer_ == nullptr) {
-    Serial.println("[photo] buffer allocation FAILED");
+  for (uint8_t i = 0; i < 2; i++) {
+    buffers_[i] = (uint8_t*)malloc(kBufferMax);
+    if (buffers_[i] == nullptr) {
+      Serial.printf("[photo] buffer %u allocation FAILED\n", i);
+    }
   }
 
   WiFi.mode(WIFI_AP);
@@ -40,12 +67,14 @@ void WifiPhotoReceiver::begin() {
   if (ap_active_) {
     Serial.printf("[photo] camera should POST to http://%s/photo\n",
                   WiFi.softAPIP().toString().c_str());
+    Serial.printf("[photo] forwarding window %lu ms\n",
+                  (unsigned long)FIELD_PHOTO_SEND_WINDOW_MS);
     fieldLink.sendEvent(0, "CAM_AP_UP", FIELD_AP_SSID);
   } else {
     fieldLink.sendEvent(2, "CAM_AP_FAIL", "softAP did not start");
   }
 
-  server.on("/photo", HTTP_POST, [this]() { handlePhoto(); });
+  server.addHandler(&photo_raw_handler);
 
   server.on("/health", HTTP_GET, []() {
     server.send(200, "application/json", "{\"status\":\"ok\",\"device\":\"field_esp32\"}");
@@ -59,86 +88,166 @@ void WifiPhotoReceiver::begin() {
   Serial.printf("[photo] HTTP server on port %d\n", FIELD_PHOTO_TCP_PORT);
 }
 
-void WifiPhotoReceiver::handlePhoto() {
-  if (buffer_ == nullptr) {
-    server.send(500, "text/plain", "no buffer");
-    frames_rejected_++;
-    return;
+int8_t WifiPhotoReceiver::freeBufferIndex() const {
+  for (int8_t i = 0; i < 2; i++) {
+    if (i != send_index_ && i != pending_index_) {
+      return i;
+    }
   }
-
-  // WebServer collects the raw request body into the "plain" argument when the
-  // content type is not form-urlencoded. The camera sends image/jpeg.
-  if (!server.hasArg("plain")) {
-    Serial.println("[photo] POST without body");
-    server.send(400, "text/plain", "empty body");
-    frames_rejected_++;
-    return;
-  }
-
-  const String& body = server.arg("plain");
-  size_t length = body.length();
-  if (length == 0) {
-    server.send(400, "text/plain", "empty body");
-    frames_rejected_++;
-    return;
-  }
-  if (length > kBufferMax) {
-    Serial.printf("[photo] frame too large: %u > %u\n",
-                  (unsigned)length, (unsigned)kBufferMax);
-    server.send(413, "text/plain", "too large");
-    frames_rejected_++;
-    return;
-  }
-
-  memcpy(buffer_, body.c_str(), length);
-
-  uint16_t sequence = nextSequence();
-  Serial.printf("[photo] frame %u received over WiFi: %u bytes\n",
-                (unsigned)sequence, (unsigned)length);
-
-  char detail[64];
-  snprintf(detail, sizeof(detail), "seq=%u bytes=%u", (unsigned)sequence, (unsigned)length);
-  fieldLink.sendEvent(0, "PHOTO_OK", detail);
-
-  forwardBuffer(buffer_, length, sequence);
-  server.send(200, "application/json", "{\"status\":\"ok\"}");
+  return -1;
 }
 
-void WifiPhotoReceiver::forwardBuffer(const uint8_t* data, size_t length, uint16_t sequence) {
-  const uint16_t total = (uint16_t)((length + ESPNOW_PHOTO_DATA_MAX - 1) / ESPNOW_PHOTO_DATA_MAX);
+void WifiPhotoReceiver::handleRaw(const HTTPRaw& raw) {
+  switch (raw.status) {
+    case RAW_START:
+      raw_length_ = 0;
+      raw_overflow_ = false;
+      raw_sequence_ = nextSequence();
+      rx_index_ = freeBufferIndex();
+      if (rx_index_ < 0) {
+        raw_overflow_ = true;
+        Serial.println("[photo] both buffers busy, upload rejected");
+      }
+      break;
 
-  for (uint16_t index = 0; index < total; index++) {
-    size_t offset = (size_t)index * ESPNOW_PHOTO_DATA_MAX;
-    size_t remaining = length - offset;
-    uint16_t chunk_len = (uint16_t)(remaining > ESPNOW_PHOTO_DATA_MAX ? ESPNOW_PHOTO_DATA_MAX : remaining);
+    case RAW_WRITE:
+      if (rx_index_ < 0 || raw_overflow_) {
+        raw_overflow_ = true;
+        break;
+      }
+      if (raw_length_ + raw.currentSize > kBufferMax) {
+        raw_overflow_ = true;
+        break;
+      }
+      memcpy(buffers_[rx_index_] + raw_length_, raw.buf, raw.currentSize);
+      raw_length_ += raw.currentSize;
+      break;
 
-    PhotoChunkMsg msg;
-    memset(&msg, 0, sizeof(msg));
-    msg.hdr.magic = ESPNOW_MAGIC;
-    msg.hdr.version = ESPNOW_PROTO_VERSION;
-    msg.hdr.type = MSG_PHOTO_CHUNK;
-    memcpy(msg.hdr.src, espNow.ownMac(), 6);
-    msg.hdr.seq = espNow.nextSeq();
-    msg.sequence = sequence;
-    msg.total_chunks = total;
-    msg.chunk_index = index;
-    msg.crc16 = crc16_ccitt(data + offset, chunk_len);
-    msg.data_len = chunk_len;
-    memcpy(msg.data, data + offset, chunk_len);
+    case RAW_END:
+      if (rx_index_ >= 0 && !raw_overflow_ && raw_length_ > 0) {
+        buffer_length_[rx_index_] = raw_length_;
+        buffer_sequence_[rx_index_] = raw_sequence_;
+        frames_received_++;
 
-    espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
-    chunks_forwarded_++;
+        Serial.printf("[photo] frame %u received over WiFi: %u bytes\n",
+                      (unsigned)raw_sequence_, (unsigned)raw_length_);
 
-    // Pace the ESP-NOW burst so the radio and the control loop stay healthy.
-    delay(3);
+        char detail[64];
+        snprintf(detail, sizeof(detail), "seq=%u bytes=%u",
+                 (unsigned)raw_sequence_, (unsigned)raw_length_);
+        fieldLink.sendEvent(0, "PHOTO_OK", detail);
+
+        // Hand the buffer to the paced sender. If a photo is already going out,
+        // park this one; the sender picks it up when it finishes.
+        if (send_index_ < 0) {
+          startSending(rx_index_);
+        } else if (pending_index_ < 0) {
+          pending_index_ = rx_index_;
+          Serial.printf("[photo] frame %u queued behind the active send\n",
+                        (unsigned)raw_sequence_);
+        } else {
+          frames_rejected_++;
+          Serial.println("[photo] send queue full, frame dropped");
+        }
+      } else {
+        frames_rejected_++;
+        if (raw_overflow_) {
+          Serial.printf("[photo] frame %u rejected (overflow/busy)\n",
+                        (unsigned)raw_sequence_);
+        }
+      }
+      rx_index_ = -1;
+      break;
+
+    case RAW_ABORTED:
+      frames_rejected_++;
+      rx_index_ = -1;
+      Serial.println("[photo] upload aborted");
+      break;
+  }
+}
+
+void WifiPhotoReceiver::startSending(int8_t index) {
+  if (index < 0 || buffers_[index] == nullptr) {
+    return;
+  }
+  send_index_ = index;
+  tx_length_ = buffer_length_[index];
+  tx_sequence_ = buffer_sequence_[index];
+  tx_total_ = (uint16_t)((tx_length_ + ESPNOW_PHOTO_DATA_MAX - 1) / ESPNOW_PHOTO_DATA_MAX);
+  tx_next_chunk_ = 0;
+  tx_next_ms_ = millis();
+
+  // Spread the whole frame over the configured window. With ~80 fragments and a
+  // 120 s window that is one frame every ~1.5 s, slow enough that the receiver
+  // never overruns.
+  if (tx_total_ == 0) {
+    tx_interval_ms_ = 1;
+  } else {
+    uint32_t interval = FIELD_PHOTO_SEND_WINDOW_MS / tx_total_;
+    tx_interval_ms_ = interval < 1 ? 1 : interval;
   }
 
-  frames_received_++;
-  Serial.printf("[photo] frame %u forwarded as %u chunks\n",
-                (unsigned)sequence, (unsigned)total);
+  Serial.printf("[photo] frame %u sending as %u chunks every %lu ms\n",
+                (unsigned)tx_sequence_, (unsigned)tx_total_,
+                (unsigned long)tx_interval_ms_);
+}
+
+void WifiPhotoReceiver::sendNextChunk() {
+  if (send_index_ < 0 || tx_next_chunk_ >= tx_total_) {
+    return;
+  }
+
+  const uint8_t* data = buffers_[send_index_];
+  const uint16_t index = tx_next_chunk_;
+  size_t offset = (size_t)index * ESPNOW_PHOTO_DATA_MAX;
+  size_t remaining = tx_length_ - offset;
+  uint16_t chunk_len =
+      (uint16_t)(remaining > ESPNOW_PHOTO_DATA_MAX ? ESPNOW_PHOTO_DATA_MAX : remaining);
+
+  PhotoChunkMsg msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.hdr.magic = ESPNOW_MAGIC;
+  msg.hdr.version = ESPNOW_PROTO_VERSION;
+  msg.hdr.type = MSG_PHOTO_CHUNK;
+  memcpy(msg.hdr.src, espNow.ownMac(), 6);
+  msg.hdr.seq = espNow.nextSeq();
+  msg.sequence = tx_sequence_;
+  msg.total_chunks = tx_total_;
+  msg.chunk_index = index;
+  msg.crc16 = crc16_ccitt(data + offset, chunk_len);
+  msg.data_len = chunk_len;
+  memcpy(msg.data, data + offset, chunk_len);
+
+  fieldLink.sendToGateway((const uint8_t*)&msg, sizeof(msg));
+  chunks_forwarded_++;
+  tx_next_chunk_++;
+
+  if (tx_next_chunk_ >= tx_total_) {
+    Serial.printf("[photo] frame %u forwarded as %u chunks\n",
+                  (unsigned)tx_sequence_, (unsigned)tx_total_);
+    send_index_ = -1;
+    if (pending_index_ >= 0) {
+      int8_t next = pending_index_;
+      pending_index_ = -1;
+      startSending(next);
+    }
+  }
+}
+
+void WifiPhotoReceiver::tickForwarding(uint32_t now_ms) {
+  if (send_index_ < 0) {
+    return;
+  }
+  if ((int32_t)(now_ms - tx_next_ms_) < 0) {
+    return;
+  }
+  sendNextChunk();
+  tx_next_ms_ = now_ms + tx_interval_ms_;
 }
 
 void WifiPhotoReceiver::poll() {
   server.handleClient();
   client_count_ = WiFi.softAPgetStationNum();
+  tickForwarding(millis());
 }

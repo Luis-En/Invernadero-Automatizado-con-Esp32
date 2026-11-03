@@ -46,6 +46,12 @@ def parse_line(raw: bytes) -> Optional[dict]:
         logger.debug("gateway comment: %s", text)
         return None
 
+    # Human-readable firmware logs (for example "[field] T=25.0C ...") are not
+    # part of the protocol. Only framed JSON lines are considered.
+    if not text.startswith("{"):
+        logger.debug("serial log: %s", text)
+        return None
+
     if "*" in text:
         payload, _, crc_text = text.rpartition("*")
         try:

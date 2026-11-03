@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
-from app.routes import auth, crops, config, photos, events
+from app.routes import auth, crops, config, photos, events, weather
 from app import seed
 
 
@@ -36,6 +36,7 @@ app.include_router(crops.router)
 app.include_router(config.router)
 app.include_router(photos.router)
 app.include_router(events.router)
+app.include_router(weather.router)
 
 _photo_dir = Path(settings.photo_storage_absolute)
 if _photo_dir.exists():

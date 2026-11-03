@@ -45,6 +45,32 @@ void DeviceRegistry::update(const uint8_t* mac, uint8_t role, const char* device
   }
 }
 
+uint8_t DeviceRegistry::roleForMac(const uint8_t* mac) const {
+  for (size_t i = 0; i < kMaxDevices; i++) {
+    if (devices_[i].used && memcmp(devices_[i].mac, mac, 6) == 0) {
+      return devices_[i].role;
+    }
+  }
+  return ROLE_UNKNOWN;
+}
+
+void DeviceRegistry::touch(const uint8_t* mac, int8_t rssi) {
+  for (size_t i = 0; i < kMaxDevices; i++) {
+    if (devices_[i].used && memcmp(devices_[i].mac, mac, 6) == 0) {
+      devices_[i].rssi = rssi;
+      devices_[i].last_seen_ms = millis();
+      return;
+    }
+  }
+  // Unknown sender: register it as a camera (the direct ESP-NOW camera path).
+  DeviceRecord* record = findOrCreate(mac);
+  record->role = ROLE_CAMERA;
+  record->rssi = rssi;
+  record->last_seen_ms = millis();
+  strncpy(record->device_id, "camera", sizeof(record->device_id) - 1);
+  record->device_id[sizeof(record->device_id) - 1] = '\0';
+}
+
 const DeviceRecord* DeviceRegistry::findRole(uint8_t role) const {
   const DeviceRecord* best = nullptr;
   for (size_t i = 0; i < kMaxDevices; i++) {

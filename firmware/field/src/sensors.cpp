@@ -36,16 +36,62 @@ uint16_t readAdcAveraged(uint8_t pin) {
   }
   return (uint16_t)(sum / SOIL_SAMPLES);
 }
+
+#if !FIELD_NO_BME280
+// Prints every device that answers on the I2C bus. Makes a mis-wired or
+// unpowered BME280 obvious on the serial console instead of a silent NaN.
+void scanI2cBus() {
+  Serial.println("[bme] I2C scan:");
+  uint8_t found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("[bme]   device at 0x%02X\n", addr);
+      found++;
+    }
+  }
+  if (found == 0) {
+    Serial.println("[bme]   no devices found");
+  }
+}
+#endif
 }  // namespace
 
 void SensorManager::begin() {
+  // Full 0-3.3 V range on ADC1. The default is usually 11 dB, but setting it
+  // explicitly keeps the calibration valid across core versions.
+  analogSetAttenuation(ADC_11db);
+
 #if !FIELD_NO_BME280
+  // 6-pin BME280: strap it into I2C mode only if the breakout leaves CSB/SDO
+  // for the host to drive. A value of -1 means the board ties them itself.
+#if FIELD_BME280_CSB_PIN >= 0
+  pinMode(FIELD_BME280_CSB_PIN, OUTPUT);
+  digitalWrite(FIELD_BME280_CSB_PIN, HIGH);
+#endif
+#if FIELD_BME280_SDO_PIN >= 0
+  pinMode(FIELD_BME280_SDO_PIN, OUTPUT);
+  digitalWrite(FIELD_BME280_SDO_PIN, LOW);
+#endif
+  delay(5);
+
   Wire.begin(FIELD_I2C_SDA, FIELD_I2C_SCL);
-  bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire);
+  delay(10);
+  scanI2cBus();
+  bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire) || bme.begin(0x77, &Wire);
+
   if (!bme_present_) {
-    // Some breakouts strap the alternate address.
-    bme_present_ = bme.begin(0x77, &Wire);
+    // SDA/SCL swapped is the most common wiring mistake. The BME280 is I2C
+    // only here (CSB/SDO are not driven), so retrying the other orientation
+    // costs nothing and saves a reflash.
+    Serial.println("[bme] not found, retrying with SDA/SCL swapped");
+    Wire.end();
+    Wire.begin(FIELD_I2C_SCL, FIELD_I2C_SDA);
+    delay(10);
+    scanI2cBus();
+    bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire) || bme.begin(0x77, &Wire);
   }
+
   if (bme_present_) {
     bme.setSampling(Adafruit_BME280::MODE_FORCED,
                     Adafruit_BME280::SAMPLING_X2,
@@ -141,9 +187,16 @@ void SensorManager::setCalibration(uint8_t index, uint16_t dry, uint16_t wet) {
 
 void SensorManager::resetCalibration() {
   for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
-    calibration_[i].dry_adc = SOIL_ADC_MAX_VALID;
-    calibration_[i].wet_adc = 1500;
+    calibration_[i].dry_adc = SOIL_CAL_DRY_DEFAULT;
+    calibration_[i].wet_adc = SOIL_CAL_WET_DEFAULT;
   }
+}
+
+uint16_t SensorManager::sampleRaw(uint8_t index) {
+  if (index >= SOIL_SENSOR_COUNT) {
+    return 0;
+  }
+  return readAdcAveraged(soil_pins_[index]);
 }
 
 void SensorManager::saveCalibration() {

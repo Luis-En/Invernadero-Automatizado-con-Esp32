@@ -17,6 +17,7 @@ bool field_was_online = false;
 bool camera_was_online = false;
 uint32_t last_heartbeat_ms = 0;
 uint32_t boot_ms = 0;
+uint32_t last_photo_ms = 0;
 
 #if GW_SIMULATE
 uint16_t sim_photo_sequence = 0;
@@ -75,6 +76,7 @@ void onInboundCommand(const InboundCommand& command) {
     case InboundKind::Timesync:
       state.syncEpoch(command.epoch);
       sendCommand(ROLE_FIELD, CMD_TIMESYNC, 0, command.epoch);
+      sendCommand(ROLE_FIELD_SECONDARY, CMD_TIMESYNC, 0, command.epoch);
       sendCommand(ROLE_CAMERA, CMD_TIMESYNC, 0, command.epoch);
       // Do not answer with a hello here: the bridge sends a timesync in reply
       // to every hello, so replying would create an endless hello/timesync
@@ -107,12 +109,20 @@ void handleTelemetry(const EspNowMessage& frame) {
   TelemetryData telemetry;
   decodeTelemetry(msg, frame.rssi, telemetry);
 
-  const char* known = registry.deviceIdForRole(ROLE_FIELD);
-  const char* deviceId = (known != nullptr && known[0] != '\0') ? known : "field_esp32";
+  uint8_t role = registry.roleForMac(frame.mac);
+  if (role != ROLE_FIELD && role != ROLE_FIELD_SECONDARY) {
+    // Unknown sender before its hello: treat it as the primary field.
+    role = ROLE_FIELD;
+  }
+
+  const char* known = registry.deviceIdForRole(role);
+  const char* fallback =
+      (role == ROLE_FIELD_SECONDARY) ? "field_secondary" : "field_primary";
+  const char* deviceId = (known != nullptr && known[0] != '\0') ? known : fallback;
   strncpy(telemetry.device_id, deviceId, sizeof(telemetry.device_id) - 1);
   telemetry.device_id[sizeof(telemetry.device_id) - 1] = '\0';
 
-  registry.update(frame.mac, ROLE_FIELD, telemetry.device_id, frame.rssi, state.now());
+  registry.update(frame.mac, role, telemetry.device_id, frame.rssi, state.now());
   serialLink.sendTelemetry(telemetry);
 
 #if GW_DEBUG_PEERS
@@ -141,7 +151,11 @@ void handlePhotoChunk(const EspNowMessage& frame) {
   decodePhotoChunk(msg, chunk);
   strncpy(chunk.device_id, "camera", sizeof(chunk.device_id) - 1);
 
-  registry.update(frame.mac, ROLE_CAMERA, chunk.device_id, frame.rssi, state.now());
+  // The frame arrives forwarded by a field node, so frame.mac is the field's,
+  // not the camera's. Refresh that peer without relabelling it, and track the
+  // camera by the last photo arrival instead.
+  registry.touch(frame.mac, frame.rssi);
+  last_photo_ms = millis();
   serialLink.sendPhotoChunk(chunk);
 }
 
@@ -235,7 +249,8 @@ DeviceStatus buildStatus() {
   DeviceStatus status;
   uint32_t nowMs = millis();
   status.field_online = registry.isOnline(ROLE_FIELD, nowMs, GW_DEVICE_TIMEOUT_MS);
-  status.camera_online = registry.isOnline(ROLE_CAMERA, nowMs, GW_DEVICE_TIMEOUT_MS);
+  status.camera_online =
+      last_photo_ms != 0 && (nowMs - last_photo_ms) <= GW_DEVICE_TIMEOUT_MS;
   status.field_rssi = registry.rssiForRole(ROLE_FIELD);
   status.camera_rssi = registry.rssiForRole(ROLE_CAMERA);
   status.field_last_seen_s = registry.secondsSinceSeen(ROLE_FIELD, nowMs);

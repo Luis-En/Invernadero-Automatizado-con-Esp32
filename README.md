@@ -207,10 +207,55 @@ JWT_SECRET_KEY=tu-clave-secreta-32-bytes
 SIMULATE=true
 SIM_TELEMETRY_INTERVAL_SEC=30
 SIM_PHOTO_INTERVAL_MIN=30
+OPENWEATHER_API_KEY=
+WEATHER_LAT=14.3333
+WEATHER_LON=-91.0167
+WEATHER_CACHE_TTL_SEC=600
 ```
 
 ### Actuadores (config/actuators.yaml)
 Define pins, tipo (relay/mosfet), active_high, max_on_seconds. El firmware y simulador leen este archivo.
+
+## 🌤️ Clima (OpenWeather)
+
+El backend consulta el clima exterior y lo muestra en el dashboard y en la
+página **Clima** (`/clima`). Es **informativo**: no controla el riego ni los
+actuadores. Útil para decidir cuándo regar (si viene lluvia, la
+evapotranspiración baja) y para vigilar tormentas.
+
+1. Crea una cuenta en [openweathermap.org](https://openweathermap.org/api) y
+   copia tu API key (el plan gratuito basta).
+2. Ponla en `.env` y reinicia el backend:
+
+   ```bash
+   OPENWEATHER_API_KEY=tu_api_key
+   ```
+
+Sin clave configurada la sección de clima se oculta con un aviso, sin afectar
+al resto del sistema.
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `OPENWEATHER_API_KEY` | vacío | Clave de OpenWeather (solo en el backend) |
+| `WEATHER_ENABLED` | `true` | Activa/desactiva la integración |
+| `WEATHER_LAT` / `WEATHER_LON` | `14.3333` / `-91.0167` | Ubicación (Santa Lucía Cotzumalguapa) |
+| `WEATHER_LOCATION_NAME` | `Santa Lucía Cotzumalguapa` | Nombre mostrado en la UI |
+| `WEATHER_UNITS` / `WEATHER_LANG` | `metric` / `es` | Unidades y idioma de las descripciones |
+| `WEATHER_CACHE_TTL_SEC` | `600` | Caché del pronóstico (protege la cuota gratuita) |
+| `WEATHER_STALE_MAX_SEC` | `7200` | Tiempo máximo de servir datos viejos si OpenWeather falla |
+
+Endpoints:
+
+```bash
+# Pronóstico normalizado (requiere sesión)
+GET /api/weather/overview?hours=48
+```
+
+El plan gratuito da pasos de 3 h y 5 días de pronóstico (`pop` de lluvia y mm
+acumulados); por eso el detalle fino de "lluvia en la próxima hora" no está
+disponible. Los datos son de OpenWeather y el pronóstico no sustituye los
+avisos oficiales (INSIVUMEH/CONRED).
+
 
 ## 🧪 Tests
 

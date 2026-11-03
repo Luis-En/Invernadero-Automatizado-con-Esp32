@@ -185,9 +185,6 @@ async def get_latest_telemetry(db: AsyncSession = Depends(get_db), user=Depends(
         if crop:
             crop_name = crop.display_name
 
-    device_result = await db.execute(select(Device).where(Device.device_type == "field"))
-    field_device = device_result.scalar_one_or_none()
-
     return TelemetrySnapshot(
         timestamp=reading.timestamp,
         temperature=reading.temperature,
@@ -246,20 +243,19 @@ async def get_system_status(db: AsyncSession = Depends(get_db), user=Depends(get
     from datetime import timedelta
 
     now = datetime.utcnow()
-    threshold = now - timedelta(minutes=5)
-
-    device_result = await db.execute(select(Device).where(Device.device_type.in_(["field", "gateway", "camera"])))
-    devices = device_result.scalars().all()
-
-    field_online = any(d.device_type == "field" and d.is_online and d.last_seen and d.last_seen > threshold for d in devices)
-    gateway_online = any(d.device_type == "gateway" and d.is_online and d.last_seen and d.last_seen > threshold for d in devices)
-    camera_online = any(d.device_type == "camera" and d.is_online and d.last_seen and d.last_seen > threshold for d in devices)
 
     telemetry_result = await db.execute(select(Reading).order_by(desc(Reading.timestamp)).limit(1))
     last_reading = telemetry_result.scalar_one_or_none()
 
     photo_result = await db.execute(select(Photo).order_by(desc(Photo.timestamp)).limit(1))
     last_photo = photo_result.scalar_one_or_none()
+
+    # A reading only reaches the API through the gateway, so fresh telemetry
+    # means both the field and the gateway are alive. Photos arrive every 3
+    # minutes; allow 10 before declaring the camera offline.
+    field_online = last_reading is not None and (now - last_reading.timestamp) <= timedelta(minutes=2)
+    gateway_online = field_online
+    camera_online = last_photo is not None and (now - last_photo.timestamp) <= timedelta(minutes=10)
 
     config_result = await db.execute(
         select(ActiveConfig).where(ActiveConfig.is_active == True).order_by(desc(ActiveConfig.version)).limit(1)
@@ -336,11 +332,16 @@ async def receive_telemetry(
         )
         db.add(reading)
 
-        # Update device last_seen
+        # Update device last_seen. A device_id can have older duplicate rows
+        # from previous runs, so take the most recent one instead of assuming
+        # exactly one match.
         result = await db.execute(
-            select(Device).where(Device.device_id == payload.get("device_id"))
+            select(Device)
+            .where(Device.device_id == payload.get("device_id"))
+            .order_by(desc(Device.last_seen))
+            .limit(1)
         )
-        device = result.scalar_one_or_none()
+        device = result.scalars().first()
         if device:
             device.last_seen = reading.timestamp
             device.is_online = True

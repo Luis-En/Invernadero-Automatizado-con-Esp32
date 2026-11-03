@@ -290,3 +290,82 @@ class SystemStatus(BaseModel):
     active_crop: Optional[str] = None
     irrigation_enabled: bool = False
     alerts_count: int = 0
+
+
+class WeatherLocation(BaseModel):
+    name: Optional[str] = None
+    country: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    timezone_offset: Optional[int] = None
+
+
+class WeatherCurrent(BaseModel):
+    time: Optional[datetime] = None
+    temperature: Optional[float] = None
+    feels_like: Optional[float] = None
+    humidity: Optional[float] = None
+    pressure: Optional[float] = None
+    wind_speed: Optional[float] = None
+    wind_gust: Optional[float] = None
+    wind_deg: Optional[int] = None
+    clouds: Optional[int] = None
+    visibility: Optional[int] = None
+    rain_1h: Optional[float] = None
+    description: Optional[str] = None
+    main: Optional[str] = None
+    icon: Optional[str] = None
+    sunrise: Optional[datetime] = None
+    sunset: Optional[datetime] = None
+
+
+class WeatherRainSummary(BaseModel):
+    status: str
+    summary: str
+    next_6h_probability: float = 0.0
+    next_24h_probability: float = 0.0
+    next_24h_mm: float = 0.0
+    first_rain_at: Optional[datetime] = None
+    first_rain_probability: Optional[float] = None
+
+
+class WeatherHour(BaseModel):
+    dt: int
+    time: datetime
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    pressure: Optional[float] = None
+    wind_speed: Optional[float] = None
+    wind_deg: Optional[int] = None
+    clouds: Optional[int] = None
+    pop: float = 0.0
+    rain_mm: float = 0.0
+    description: Optional[str] = None
+    main: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class WeatherDay(BaseModel):
+    date: str
+    temp_min: Optional[float] = None
+    temp_max: Optional[float] = None
+    humidity_avg: Optional[int] = None
+    wind_max: Optional[float] = None
+    pop_max: float = 0.0
+    rain_mm: float = 0.0
+    description: Optional[str] = None
+    icon: Optional[str] = None
+
+
+class WeatherOverview(BaseModel):
+    configured: bool
+    stale: bool = False
+    error: Optional[str] = None
+    fetched_at: Optional[datetime] = None
+    hours: int = 48
+    units: str = "metric"
+    location: Optional[WeatherLocation] = None
+    current: Optional[WeatherCurrent] = None
+    rain: Optional[WeatherRainSummary] = None
+    hourly: List[WeatherHour] = Field(default_factory=list)
+    daily: List[WeatherDay] = Field(default_factory=list)

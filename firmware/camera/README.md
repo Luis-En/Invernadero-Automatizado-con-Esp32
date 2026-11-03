@@ -31,9 +31,9 @@ stuck at `Connecting....`, hold **GPIO0 to GND** during reset.
 ## How it connects
 
 1. Boots, joins the Wi-Fi network `invernadero-campo` (raised by the field node).
-2. Waits 20 s, then captures the first JPEG and POSTs it to
+2. Waits 5 s, then captures the first JPEG and POSTs it to
    `http://192.168.4.1/photo`.
-3. Repeats every 30 minutes.
+3. Repeats every 3 minutes.
 
 The credentials and the field node address are in `include/config.h` and must
 match `firmware/field/include/config.h` (`FIELD_AP_*`).
@@ -44,8 +44,8 @@ match `firmware/field/include/config.h` (`FIELD_AP_*`).
 |---------|-------|-----------|
 | Resolution | VGA 640x480 | ~30 KB JPEG, uploads over Wi-Fi in a second |
 | JPEG quality | 12 | good size/quality trade-off |
-| Cadence | 30 min | matches the Pi backend default |
-| First capture | 20 s after boot | lets the pipeline be verified quickly |
+| Cadence | 3 min | keeps the link lightly loaded while still tracking the crop |
+| First capture | 5 s after boot | lets the pipeline be verified quickly |
 
 Without PSRAM the firmware falls back to QVGA so the node still produces
 images.

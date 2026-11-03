@@ -22,8 +22,8 @@ class SensorManager {
   void read(SensorSnapshot& out);
 
   struct Calibration {
-    uint16_t dry_adc = SOIL_ADC_MAX_VALID;
-    uint16_t wet_adc = 1500;
+    uint16_t dry_adc = SOIL_CAL_DRY_DEFAULT;
+    uint16_t wet_adc = SOIL_CAL_WET_DEFAULT;
   };
 
   const Calibration& calibration(uint8_t index) const { return calibration_[index]; }
@@ -31,6 +31,10 @@ class SensorManager {
   void saveCalibration();
   void loadCalibration();
   void resetCalibration();
+
+  // Raw averaged ADC for one slot, regardless of the wired mask. Used by the
+  // CAL DRY/WET commands to capture a calibration point.
+  uint16_t sampleRaw(uint8_t index);
 
   // BME280 presence is detected at begin(); when absent readings are NAN.
   bool bmePresent() const { return bme_present_; }

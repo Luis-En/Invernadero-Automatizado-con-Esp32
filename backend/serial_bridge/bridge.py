@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -46,6 +47,11 @@ class SerialBridge:
         self.device_username = os.getenv("DEVICE_USERNAME", "viewer")
         self.device_password = os.getenv("DEVICE_PASSWORD", "viewer123")
         self._token: Optional[str] = None
+        # Latest frame from each field node. The two nodes are merged into a
+        # single 6-slot reading so the backend/frontend keep their current model
+        # (slots 0-1 = primary probes 34/35, slots 2-5 = secondary probes 32-35).
+        self.primary: Optional[dict] = None
+        self.secondary: Optional[dict] = None
 
     async def _ensure_token(self) -> None:
         if self._token:
@@ -171,9 +177,19 @@ class SerialBridge:
         self.source = SerialSource(self.serial_port, self.baudrate)
         await self.source.start()
         asyncio.create_task(self._handshake_loop())
+        asyncio.create_task(self._timesync_loop())
 
         async for message in self.source.messages():
             await self._dispatch(message)
+
+    async def _timesync_loop(self) -> None:
+        # Keep resending the clock. The gateway forwards each timesync to both
+        # field nodes, and a node learns the gateway MAC from that frame, so a
+        # node that boots after the first handshake still switches to unicast.
+        while self.running and self.source is not None:
+            if await self.source.wait_open(timeout=1.0):
+                self.source.write_json({"type": "timesync", "epoch": int(time.time())})
+            await asyncio.sleep(30)
 
     async def _handshake_loop(self) -> None:
         # Ping until the gateway answers with a hello, which triggers a
@@ -188,7 +204,7 @@ class SerialBridge:
     async def _dispatch(self, message: dict) -> None:
         kind = message.get("type")
         if kind == "telemetry":
-            await self._post_telemetry(message)
+            await self._handle_field_telemetry(message)
         elif kind == "photo_chunk":
             await self._post_photo_chunk(message)
         elif kind == "hello":
@@ -209,12 +225,71 @@ class SerialBridge:
         else:
             logger.debug("ignoring gateway message type=%s", kind)
 
+    async def _handle_field_telemetry(self, message: dict) -> None:
+        """Merge the two field nodes into one reading.
+
+        The primary owns the BME280, the actuators and two probes (GPIO34/35).
+        The secondary owns four probes (GPIO32-35). Posting a merged payload
+        keeps the backend's 6-slot soil model and the dashboard unchanged.
+        """
+        if message.get("device_id") == "field_secondary":
+            self.secondary = message
+            # Before the primary has ever reported, still publish something.
+            if self.primary is None:
+                await self._post_telemetry(self._merge_fields())
+            return
+
+        self.primary = message
+        await self._post_telemetry(self._merge_fields())
+
+    @staticmethod
+    def _array(source: dict, key: str, default, size: int = 6) -> list:
+        value = source.get(key)
+        if not isinstance(value, list) or len(value) < size:
+            return [default] * size
+        return value
+
+    def _merge_fields(self) -> dict:
+        primary = self.primary or {}
+        secondary = self.secondary or {}
+
+        p_adc = self._array(primary, "soil_adc", 0)
+        p_pct = self._array(primary, "soil_pct", 0.0)
+        p_ok = self._array(primary, "soil_ok", False)
+        s_adc = self._array(secondary, "soil_adc", 0)
+        s_pct = self._array(secondary, "soil_pct", 0.0)
+        s_ok = self._array(secondary, "soil_ok", False)
+
+        return {
+            "timestamp": primary.get("timestamp") or secondary.get("timestamp"),
+            "temperature": primary.get("temperature"),
+            "humidity": primary.get("humidity"),
+            "pressure": primary.get("pressure"),
+            "soil_adc": [p_adc[0], p_adc[1], s_adc[0], s_adc[1], s_adc[2], s_adc[3]],
+            "soil_pct": [p_pct[0], p_pct[1], s_pct[0], s_pct[1], s_pct[2], s_pct[3]],
+            "soil_ok": [p_ok[0], p_ok[1], s_ok[0], s_ok[1], s_ok[2], s_ok[3]],
+            "fan_1_state": primary.get("fan_1_state", False),
+            "fan_2_state": primary.get("fan_2_state", False),
+            "humidifier_1_state": primary.get("humidifier_1_state", False),
+            "humidifier_2_state": primary.get("humidifier_2_state", False),
+            "pump_state": primary.get("pump_state", False),
+            "rssi": primary.get("rssi"),
+            "device_id": "field_primary",
+            "sequence": primary.get("sequence"),
+        }
+
     # ------------------------------------------------------------------
     # API posting
     # ------------------------------------------------------------------
 
     async def _post_telemetry(self, message: dict) -> None:
         payload = {key: value for key, value in message.items() if key != "type"}
+        # The field node only knows wall time once it has been time-synced. When
+        # it has no clock it omits the timestamp, so stamp the arrival time here.
+        if not payload.get("timestamp"):
+            payload["timestamp"] = (
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            )
         try:
             await self.client.post(f"{self.api_url}{TELEMETRY_URL}", json=payload)
         except Exception as exc:

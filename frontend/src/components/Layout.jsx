@@ -14,6 +14,7 @@ export function Layout() {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: '📊' },
     { path: '/photos', label: 'Fotos', icon: '📸' },
+    { path: '/clima', label: 'Clima', icon: '🌤️' },
     { path: '/history', label: 'Historial', icon: '📈' },
     { path: '/events', label: 'Eventos', icon: '⚠️' },
   ]

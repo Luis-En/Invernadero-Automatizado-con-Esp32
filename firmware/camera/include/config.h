@@ -7,10 +7,10 @@
 #define CAM_FW_VERSION "2.0.0"
 #define CAM_DEVICE_ID "camera"
 
-// Capture cadence. The default is every 30 minutes.
-#define CAM_CAPTURE_INTERVAL_MS (30UL * 60UL * 1000UL)
+// Capture cadence. Every 3 minutes.
+#define CAM_CAPTURE_INTERVAL_MS (3UL * 60UL * 1000UL)
 // First capture after boot: keep it short so the pipeline can be verified.
-#define CAM_FIRST_CAPTURE_DELAY_MS 20000UL
+#define CAM_FIRST_CAPTURE_DELAY_MS 5000UL
 
 // VGA at quality 12 is a good size/quality trade-off for ESP-NOW forwarding.
 #define CAM_FRAME_SIZE FRAMESIZE_VGA

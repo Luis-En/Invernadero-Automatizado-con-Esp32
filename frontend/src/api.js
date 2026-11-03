@@ -157,6 +157,11 @@ class ApiClient {
     return this.get('/api/config/status')
   }
 
+  // Weather
+  getWeather(hours = 48) {
+    return this.get(`/api/weather/overview?hours=${hours}`)
+  }
+
   // Photos
   getPhotos(limit = 50, offset = 0) {
     return this.get(`/api/photos?limit=${limit}&offset=${offset}`)

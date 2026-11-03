@@ -68,6 +68,10 @@ Authorization: Bearer {{token}}
 GET {{host}}/api/events/unacknowledged
 Authorization: Bearer {{token}}
 
+### Weather: current + rain forecast (needs OPENWEATHER_API_KEY in .env)
+GET {{host}}/api/weather/overview?hours=48
+Authorization: Bearer {{token}}
+
 ### Device-facing telemetry ingest (as the gateway would send it)
 POST {{host}}/api/config/telemetry
 Content-Type: application/json

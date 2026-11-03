@@ -38,7 +38,11 @@ async def list_photos(
     user=Depends(get_current_active_user),
 ):
     result = await db.execute(
-        select(Photo).order_by(desc(Photo.timestamp)).limit(limit).offset(offset)
+        select(Photo)
+        .where(Photo.is_complete == True)
+        .order_by(desc(Photo.timestamp))
+        .limit(limit)
+        .offset(offset)
     )
     return result.scalars().all()
 
@@ -55,7 +59,13 @@ async def get_latest_photo(db: AsyncSession = Depends(get_db), user=Depends(get_
 
 
 @router.get("/latest/file")
-async def get_latest_photo_file(db: AsyncSession = Depends(get_db), user=Depends(get_optional_user)):
+async def get_latest_photo_file(db: AsyncSession = Depends(get_db)):
+    """Serve the newest complete JPEG.
+
+    No bearer token here on purpose: the dashboard renders it with a plain
+    <img> tag, which cannot attach an Authorization header. Photo listing and
+    metadata still require authentication.
+    """
     result = await db.execute(
         select(Photo).where(Photo.is_complete == True).order_by(desc(Photo.timestamp)).limit(1)
     )
@@ -104,8 +114,21 @@ async def receive_photo_chunk(
     now = datetime.utcnow()
     photo_dir = photo_dir_for(now)
 
+    # The camera restarts its sequence counter at 0 on every boot, so the same
+    # sequence can appear more than once. Only continue a photo that is still
+    # incomplete and recent; otherwise start a fresh record so fragments from
+    # an earlier photo are never mixed in.
+    cutoff = now - timedelta(minutes=15)
     result = await db.execute(
-        select(Photo).where(Photo.sequence == sequence).order_by(desc(Photo.timestamp)).limit(1)
+        select(Photo)
+        .where(
+            Photo.sequence == sequence,
+            Photo.device_id == device_id,
+            Photo.is_complete.is_(False),
+            Photo.timestamp >= cutoff,
+        )
+        .order_by(desc(Photo.timestamp))
+        .limit(1)
     )
     photo = result.scalar_one_or_none()
 
@@ -126,14 +149,17 @@ async def receive_photo_chunk(
         await db.flush()
 
     chunk_path = photo_dir / f"{photo.id}_{chunk_index}{CHUNK_SUFFIX}"
+    is_new_chunk = not chunk_path.exists()
     with open(chunk_path, "wb") as f:
         f.write(chunk_data)
 
     if photo.chunks_total != total_chunks:
         photo.chunks_total = max(photo.chunks_total or 0, total_chunks)
 
-    photo.size_bytes = (photo.size_bytes or 0) + len(chunk_data)
-    photo.chunks_received = (photo.chunks_received or 0) + 1
+    # Count each fragment once, even if the same one is delivered twice.
+    if is_new_chunk:
+        photo.size_bytes = (photo.size_bytes or 0) + len(chunk_data)
+        photo.chunks_received = (photo.chunks_received or 0) + 1
     photo.is_complete = photo.chunks_received >= photo.chunks_total
 
     await db.commit()
@@ -189,7 +215,8 @@ async def get_photo(photo_id: int, db: AsyncSession = Depends(get_db), user=Depe
 
 
 @router.get("/{photo_id}/file")
-async def get_photo_file(photo_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_active_user)):
+async def get_photo_file(photo_id: int, db: AsyncSession = Depends(get_db)):
+    # Public for the same reason as /latest/file: <img> cannot send a token.
     result = await db.execute(select(Photo).where(Photo.id == photo_id))
     photo = result.scalar_one_or_none()
     if not photo:

@@ -9,28 +9,58 @@
 // with the Wi-Fi/ESP-NOW radio and returns garbage while the radio is up.
 
 #define FIELD_FW_VERSION_MAJOR 1
-#define FIELD_FW_VERSION_MINOR 0
+#define FIELD_FW_VERSION_MINOR 1
 #define FIELD_FW_VERSION_PATCH 0
-#define FIELD_FW_VERSION "1.0.0"
+#define FIELD_FW_VERSION "1.1.0"
 
-#define FIELD_DEVICE_ID "field_esp32"
+// Selects which of the two field nodes this build is. The primary owns the
+// BME280, the actuators and the camera AP; the secondary only reads the extra
+// soil probes and forwards them over ESP-NOW.
+#ifndef FIELD_ROLE_SECONDARY
+#define FIELD_ROLE_SECONDARY 0
+#endif
+
+#if FIELD_ROLE_SECONDARY
+#define FIELD_DEVICE_ID "field_secondary"
+#define FIELD_HAS_BME280 0
+#define FIELD_HAS_ACTUATORS 0
+#define FIELD_HAS_CAMERA_AP 0
+#else
+#define FIELD_DEVICE_ID "field_primary"
+#define FIELD_HAS_BME280 1
+#define FIELD_HAS_ACTUATORS 1
+#define FIELD_HAS_CAMERA_AP 1
+#endif
 
 // ---------------------------------------------------------------------------
-// Soil sensors (capacitive v1.2, analog out). Order matches A1,A2,A3,B1,B2,B3.
+// Soil sensors (capacitive v1.2, analog out) on ADC1 only.
+//
+// Primary:   2 probes on GPIO34, GPIO35.
+// Secondary: 4 probes on GPIO32, GPIO33, GPIO34, GPIO35.
+//
+// Slots are A1..A3, B1..B3. Only the ones in FIELD_SOIL_MASK are read; the
+// rest are reported invalid instead of sampling a floating pin.
 // ---------------------------------------------------------------------------
+#if FIELD_ROLE_SECONDARY
 #define SOIL_PIN_A1 32
 #define SOIL_PIN_A2 33
 #define SOIL_PIN_A3 34
 #define SOIL_PIN_B1 35
 #define SOIL_PIN_B2 36
 #define SOIL_PIN_B3 39
-
-// Which soil probes are physically connected. Bit 0=A1, 1=A2, 2=A3, 3=B1,
-// 4=B2, 5=B3. Unset bits are reported as invalid instead of being read from a
-// floating pin. Default: only B1 (GPIO35, "D35") is wired, matching the
-// current bench setup. Set to 0x3F (all) for the full 19 m greenhouse.
 #ifndef FIELD_SOIL_MASK
-#define FIELD_SOIL_MASK 0x08
+#define FIELD_SOIL_MASK 0x0F
+#endif
+#else
+#define SOIL_PIN_A1 34
+#define SOIL_PIN_A2 35
+#define SOIL_PIN_A3 36
+#define SOIL_PIN_B1 39
+#define SOIL_PIN_B2 25
+#define SOIL_PIN_B3 26
+#ifndef FIELD_SOIL_MASK
+#define FIELD_SOIL_MASK 0x03
+#endif
 #endif
 
 // Diagnostic scan: read every ADC1 pin in SOIL_PINS regardless of the mask and
@@ -47,16 +77,25 @@
 #define SOIL_ADC_MIN_VALID 200
 #define SOIL_ADC_MAX_VALID 4050
 
+// Default 2-point calibration for the capacitive v1.2 probe at 3.3 V:
+// dry air ~3.3 V (ADC ~3400), water ~1.6 V (ADC ~1600). Every probe varies, so
+// use the CAL commands over the USB serial to calibrate each one in place.
+#define SOIL_CAL_DRY_DEFAULT 3400
+#define SOIL_CAL_WET_DEFAULT 1600
+
 // ---------------------------------------------------------------------------
-// BME280 (I2C). On the ESP32 the default I2C pins are SDA=21/SDO, but GPIO21
-// is used by the pump, so the bus is moved to 25/26 below.
+// BME280 (primary only). SCL -> GPIO32, SDA -> GPIO33. The 6-pin module's
+// CSB/SDO are assumed strapped on the board (CSB high = I2C, SDO low = 0x76);
+// set the macros below to a GPIO if your breakout needs them driven.
 // ---------------------------------------------------------------------------
-#define FIELD_I2C_SDA 25
-#define FIELD_I2C_SCL 26
+#define FIELD_I2C_SDA 33
+#define FIELD_I2C_SCL 32
+#define FIELD_BME280_CSB_PIN -1
+#define FIELD_BME280_SDO_PIN -1
 #define FIELD_BME280_ADDR 0x76
 
 // ---------------------------------------------------------------------------
-// Actuators. active_high matches config/actuators.yaml.
+// Actuators (primary only). active_high matches config/actuators.yaml.
 // ---------------------------------------------------------------------------
 #define ACT_PIN_FAN_1 16
 #define ACT_PIN_FAN_2 17
@@ -98,13 +137,18 @@
 #define FIELD_PHOTO_BUFFER_MAX 40960         // one VGA JPEG plus header room
 #define FIELD_PHOTO_TCP_PORT 80
 
+// Spread each photo's ESP-NOW chunks over this window instead of bursting them
+// back to back. A burst of ~80 frames overruns the receiver and loses most of
+// them; pacing to one chunk every window/total ms keeps the radio healthy.
+#define FIELD_PHOTO_SEND_WINDOW_MS 120000UL
+
 // Optional bench build: fake sensors, no BME280 required.
 #ifndef FIELD_BENCH
 #define FIELD_BENCH 0
 #endif
 
 #ifndef FIELD_NO_BME280
-#define FIELD_NO_BME280 0
+#define FIELD_NO_BME280 (!FIELD_HAS_BME280)
 #endif
 
 // Diagnostic build: print every photo chunk received from the camera over the
@@ -112,4 +156,11 @@
 // field UART link on hardware without a gateway. Enable with -DFIELD_PHOTO_TEST=1.
 #ifndef FIELD_PHOTO_TEST
 #define FIELD_PHOTO_TEST 0
+#endif
+
+// Calibration-only build: skip Wi-Fi/ESP-NOW entirely so a node on a weak USB
+// supply (which browns out when the radio starts) can still boot and accept
+// the CAL commands. Calibration lives in NVS and survives the reflash.
+#ifndef FIELD_CALIBRATION_ONLY
+#define FIELD_CALIBRATION_ONLY 0
 #endif

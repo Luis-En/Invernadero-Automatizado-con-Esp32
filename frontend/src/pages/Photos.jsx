@@ -61,7 +61,7 @@ export function Photos() {
         <div>
           <h1 className="page-title">Galería de Fotos</h1>
           <p style={{ color: 'var(--color-text-muted)' }}>
-            Fotografías periódicas del cultivo (cada 30 min)
+            Fotografías periódicas del cultivo (cada 3 minutos)
           </p>
         </div>
         <button onClick={handleRefresh} className="btn btn-primary" disabled={loading}>

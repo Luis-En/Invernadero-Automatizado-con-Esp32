@@ -34,6 +34,9 @@ enum DeviceRole : uint8_t {
   ROLE_FIELD = 1,
   ROLE_GATEWAY = 2,
   ROLE_CAMERA = 3,
+  // Second field node (the one reading the extra probes). It uses the same
+  // telemetry frames as ROLE_FIELD so the gateway can forward both.
+  ROLE_FIELD_SECONDARY = 4,
 };
 
 enum CommandCode : uint8_t {

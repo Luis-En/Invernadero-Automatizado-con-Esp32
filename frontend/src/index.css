@@ -544,3 +544,53 @@ tbody tr:hover {
 .tab:hover:not(.active) {
   color: var(--color-text);
 }
+
+/* --- Weather --------------------------------------------------------- */
+
+.weather-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.weather-temp {
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.weather-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1rem;
+}
+
+.weather-stat-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.weather-stat-value {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.weather-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+}
+
+.weather-table-wrap {
+  overflow-x: auto;
+}
+
+.weather-table th,
+.weather-table td {
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
