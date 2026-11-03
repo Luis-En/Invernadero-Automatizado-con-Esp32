@@ -162,6 +162,10 @@ class ApiClient {
     return this.get(`/api/weather/overview?hours=${hours}`)
   }
 
+  commandActuator(actuator, state) {
+    return this.post(`/api/actuators/${actuator}/command`, { state })
+  }
+
   // Photos
   getPhotos(limit = 50, offset = 0) {
     return this.get(`/api/photos?limit=${limit}&offset=${offset}`)
