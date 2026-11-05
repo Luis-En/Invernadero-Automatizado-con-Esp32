@@ -1,7 +1,8 @@
 import asyncio
 from sqlalchemy import select
 from app.models import Base, User, Crop, CropParam, ActiveConfig
-from app.auth import get_password_hash
+from app.auth import get_password_hash, verify_password
+from app.config import settings
 
 
 CROPS_DATA = [
@@ -314,28 +315,39 @@ async def ensure_seed_data(session_factory=None):
         session_factory = AsyncSessionLocal
 
     async with session_factory() as db:
-        admin_result = await db.execute(select(User).where(User.username == "admin"))
+        admin_result = await db.execute(
+            select(User).where(User.username == settings.ADMIN_USERNAME)
+        )
         admin = admin_result.scalar_one_or_none()
         if not admin:
             admin = User(
-                username="admin",
+                username=settings.ADMIN_USERNAME,
                 email="admin@greenhouse.local",
-                hashed_password=get_password_hash("admin123"),
+                hashed_password=get_password_hash(settings.ADMIN_PASSWORD or "admin123"),
                 role="admin",
                 is_active=True,
             )
             db.add(admin)
             await db.flush()
+        elif settings.ADMIN_PASSWORD and not verify_password(
+            settings.ADMIN_PASSWORD, admin.hashed_password
+        ):
+            admin.hashed_password = get_password_hash(settings.ADMIN_PASSWORD)
 
         viewer_result = await db.execute(select(User).where(User.username == "viewer"))
-        if not viewer_result.scalar_one_or_none():
+        viewer = viewer_result.scalar_one_or_none()
+        if not viewer:
             db.add(User(
                 username="viewer",
                 email="viewer@greenhouse.local",
-                hashed_password=get_password_hash("viewer123"),
+                hashed_password=get_password_hash(settings.VIEWER_PASSWORD or "viewer123"),
                 role="viewer",
                 is_active=True,
             ))
+        elif settings.VIEWER_PASSWORD and not verify_password(
+            settings.VIEWER_PASSWORD, viewer.hashed_password
+        ):
+            viewer.hashed_password = get_password_hash(settings.VIEWER_PASSWORD)
 
         first_crop_id = None
         for crop_data in CROPS_DATA:

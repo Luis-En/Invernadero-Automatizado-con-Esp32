@@ -63,6 +63,27 @@ docker compose logs -f
 # Usuario: viewer / viewer123
 ```
 
+## ☁️ Despliegue en Dokploy (producción)
+
+Para publicar el sistema en un servidor con [Dokploy](https://dokploy.com) se
+usa un compose distinto, con el frontend compilado y servido por Nginx (un solo
+origen, sin CORS ni `localhost`). Incluye la API, el simulador/puente serial y
+un broker MQTT interno.
+
+```bash
+# El código debe estar en un repositorio Git accesible por Dokploy.
+# En Dokploy, dentro del servicio Compose:
+#   Compose Path: ./docker-compose.dokploy.yml
+#   Environment:  copia .env.dokploy.example y cambia las claves
+#   Domains:      servicio "frontend", puerto interno 80 (o usa IP:8080)
+```
+
+Guía completa paso a paso, acceso por IP/dominio, MQTT, backups, hardware real
+y solución de problemas: [`docs/dokploy.md`](docs/dokploy.md).
+
+> En producción define `ADMIN_PASSWORD`, `VIEWER_PASSWORD` y
+> `JWT_SECRET_KEY`; no uses las credenciales de ejemplo.
+
 ## 🧪 Verificación
 
 ```bash

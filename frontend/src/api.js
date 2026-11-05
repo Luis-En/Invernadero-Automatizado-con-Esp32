@@ -1,5 +1,16 @@
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/config/ws'
+// In production Nginx serves the SPA and proxies /api to the backend, so the
+// safest default is the current origin. In local development Vite's proxy
+// (see vite.config.js) forwards /api to http://localhost:8000 as well.
+// VITE_API_URL / VITE_WS_URL can still be set to point at another host.
+const browserOrigin =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'http://localhost:8000'
+
+export const API_URL = import.meta.env.VITE_API_URL || browserOrigin
+export const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  `${browserOrigin.replace(/^http/, 'ws')}/api/config/ws`
 
 class ApiClient {
   constructor() {

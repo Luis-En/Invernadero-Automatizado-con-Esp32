@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # Anchor for relative sqlite/photo paths when running from /app/app in Docker.
     APP_ROOT: str = "/app"
 
+    # Seed users (only created the first time the database is initialized).
+    # Set strong values in production; if they are set, the password is also
+    # synchronized on every startup so existing volumes pick up the change.
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = ""
+    VIEWER_PASSWORD: str = ""
+
     class Config:
         extra = "ignore"  # Root .env also contains serial/frontend settings.
         env_file = ".env"

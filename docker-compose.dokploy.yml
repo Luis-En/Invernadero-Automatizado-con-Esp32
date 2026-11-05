@@ -1,0 +1,143 @@
+# Producción para Dokploy.
+#
+# Este archivo es el que debes configurar como "Compose Path" en Dokploy:
+#   ./docker-compose.dokploy.yml
+#
+# Diferencias con docker-compose.yml (que es solo para desarrollo local):
+#   - El frontend se compila y se sirve con Nginx (no `npm run dev`).
+#   - Nginx hace de reverse proxy de /api, /photos y del WebSocket, así que
+#     todo se sirve desde un único origen (sin CORS ni localhost).
+#   - No se monta el código fuente; se usa lo que queda dentro de la imagen.
+#   - Los datos (SQLite + fotos) viven en el volumen nombrado `greenhouse_data`.
+#   - El bridge serial corre en modo simulación salvo que configures hardware.
+#   - El broker MQTT queda solo en la red interna (no se publica al exterior).
+#
+# Las variables ${...} se leen del .env que Dokploy escribe desde la pestaña
+# "Environment". Mira .env.dokploy.example para la lista completa.
+
+services:
+  api:
+    build:
+      context: ./backend/api
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./data/greenhouse.db
+      APP_ROOT: /app
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY es obligatorio}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost"]}'
+      PHOTO_STORAGE_PATH: /app/data/photos
+      PHOTO_MAX_SIZE_MB: ${PHOTO_MAX_SIZE_MB:-5}
+      PHOTO_RETENTION_DAYS: ${PHOTO_RETENTION_DAYS:-30}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      WEATHER_ENABLED: ${WEATHER_ENABLED:-true}
+      WEATHER_LAT: ${WEATHER_LAT:-14.3333}
+      WEATHER_LON: ${WEATHER_LON:--91.0167}
+      WEATHER_LOCATION_NAME: ${WEATHER_LOCATION_NAME:-Santa Lucía Cotzumalguapa}
+      WEATHER_UNITS: ${WEATHER_UNITS:-metric}
+      WEATHER_LANG: ${WEATHER_LANG:-es}
+      WEATHER_CACHE_TTL_SEC: ${WEATHER_CACHE_TTL_SEC:-600}
+      WEATHER_STALE_MAX_SEC: ${WEATHER_STALE_MAX_SEC:-7200}
+      WEATHER_TIMEOUT_SEC: ${WEATHER_TIMEOUT_SEC:-8}
+      MQTT_ENABLED: ${MQTT_ENABLED:-true}
+      MQTT_HOST: mqtt
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TLS: ${MQTT_TLS:-false}
+      MQTT_DEVICE_ID: ${MQTT_DEVICE_ID:-field_esp32}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-invernadero}
+      MQTT_TIMEOUT_SECONDS: ${MQTT_TIMEOUT_SECONDS:-5}
+    volumes:
+      - greenhouse_data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      - mqtt
+    networks:
+      - greenhouse_internal
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    expose:
+      - "1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - greenhouse_internal
+
+  serial-bridge:
+    build:
+      context: ./backend/serial_bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # true = datos simulados (dashboard funcionando sin hardware)
+      SIMULATE: ${SIMULATE:-true}
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyUSB0}
+      SERIAL_BAUDRATE: ${SERIAL_BAUDRATE:-115200}
+      SIM_TELEMETRY_INTERVAL_SEC: ${SIM_TELEMETRY_INTERVAL_SEC:-30}
+      SIM_PHOTO_INTERVAL_MIN: ${SIM_PHOTO_INTERVAL_MIN:-30}
+      SIM_FIRST_PHOTO_DELAY_SEC: ${SIM_FIRST_PHOTO_DELAY_SEC:-30}
+      API_URL: http://api:8000
+      DEVICE_USERNAME: ${DEVICE_USERNAME:-viewer}
+      DEVICE_PASSWORD: ${DEVICE_PASSWORD:-viewer123}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - greenhouse_internal
+    # Para usar el ESP32 real por USB, descomenta y pon SIMULATE=false.
+    # El host debe exponer el dispositivo (ej. /dev/ttyUSB0).
+    # devices:
+    #   - "${SERIAL_DEVICE:-/dev/ttyUSB0}:${SERIAL_DEVICE:-/dev/ttyUSB0}"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    expose:
+      - "80"
+    # Acceso directo por IP de la red local (sin Traefik ni dominio):
+    # http://<IP-del-servidor>:8080
+    # Si prefieres usar solo un dominio, puedes quitar este bloque.
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - greenhouse_internal
+      - dokploy-network
+    labels:
+      # El contenedor está en dos redes; le decimos a Traefik cuál usar para
+      # el dominio que configures en Dokploy.
+      - "traefik.docker.network=dokploy-network"
+
+volumes:
+  greenhouse_data:
+
+networks:
+  greenhouse_internal:
+    driver: bridge
+  # Red que usa Traefik/Dokploy para enrutar el dominio. Ya existe en un
+  # servidor con Dokploy instalado.
+  dokploy-network:
+    external: true

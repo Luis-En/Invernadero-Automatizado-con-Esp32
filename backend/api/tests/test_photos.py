@@ -72,6 +72,13 @@ async def test_photo_reassembled_and_served(client, auth_admin):
     assert file_resp.status_code == 200
     assert file_resp.content == FAKE_JPEG
 
+    # The UI renders <img src="..."> which cannot send the Authorization
+    # header, so individual files must be reachable without a bearer token
+    # (same as /latest/file).
+    by_id = await client.get(f"/api/photos/{photo['id']}/file")
+    assert by_id.status_code == 200
+    assert by_id.content == FAKE_JPEG
+
 
 async def test_photos_list_requires_auth(client):
     resp = await client.get("/api/photos")
