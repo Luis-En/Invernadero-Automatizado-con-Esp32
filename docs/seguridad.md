@@ -229,8 +229,6 @@ en un despliegue nuevo se puede ejecutar como UID 1000 y hacer
 - El token de dispositivo es compartido por todos los gateways; rotarlo requiere
   actualizar el firmware.
 - El enlace con el gateway es USB serial local; no hay broker expuesto en la LAN.
-- `config/passwd` de Mosquitto debe ser legible por el contenedor del broker;
-  contiene hashes, no contraseñas en claro. Restringe el acceso al host.
 - Si se usa un túnel/proxy, `$remote_addr` puede ser el proxy y el baneo por IP
   debe hacerse en el perímetro.
 - La API es un solo worker; el estado del vigilante de riego no se comparte

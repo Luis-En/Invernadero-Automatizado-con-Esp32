@@ -35,6 +35,8 @@ export default defineConfig({
     // explicitly only when you need to test from a phone.
     host: process.env.VITE_DEV_HOST || '127.0.0.1',
     port: 5173,
+    // A single entry with ws:true proxies both REST and the /api/config/ws
+    // WebSocket to the API during local development.
     proxy: {
       '/api': {
         target: process.env.VITE_DEV_API_TARGET || 'http://localhost:8000',

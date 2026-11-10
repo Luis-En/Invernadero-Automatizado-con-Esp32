@@ -81,6 +81,12 @@ All notable changes to this project. Format based on Keep a Changelog and
 - Public pages reuse the admin status poll only every 60 s and do not open a
   second admin WebSocket, reducing phone battery/network use.
 
+### Removed
+
+- MQTT control channel (backend, firmware and broker config). Actuator
+  commands now go through the authenticated admin API, and device ingestion
+  uses the shared `DEVICE_API_TOKEN` over HTTP.
+
 ### Fixed
 
 - Offline PWA: the last known user (id/username/role, no credentials) is kept
@@ -120,8 +126,6 @@ All notable changes to this project. Format based on Keep a Changelog and
   `/photos` mount is gone; images are served by the authenticated router.
 - ESP-NOW supports PMK + LMK and a pinned gateway MAC, with duplicate/old
   sequence rejection and refusal of config versions older than NVS.
-- MQTT moved from the field node to the gateway. The broker requires
-  credentials and per-topic ACLs, and no longer publishes 1883 to the host.
 - No default `admin123`/`viewer123` accounts. The API refuses to start with the
   shipped JWT secret; `ADMIN_PASSWORD` creates the initial admin.
 - Password hashing defaults to bcrypt (existing sha256 hashes still verify).
@@ -142,8 +146,7 @@ All notable changes to this project. Format based on Keep a Changelog and
   WebSocket path.
 - Alembic migrations (`backend/api/alembic`), CI workflow, npm lockfile,
   ESLint config and Vitest tests.
-- Backup script (`scripts/backup.sh`) and MQTT credential helper
-  (`scripts/mqtt_setup.sh`).
+- Backup script (`scripts/backup.sh`).
 - Automated-logic parity test between the Python reference and the firmware
   cases.
 
