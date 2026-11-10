@@ -59,7 +59,13 @@ class SerialBridge:
         self.http_port = int(os.getenv("BRIDGE_HTTP_PORT", "8081"))
 
     def _device_headers(self) -> dict:
-        return {"X-Device-Token": self.device_token} if self.device_token else {}
+        # The API enforces HTTPS in production. This bridge is an internal,
+        # trusted client (it talks to the API over the Compose network), so it
+        # declares the secure scheme the same way the TLS proxy does.
+        headers = {"X-Forwarded-Proto": "https"}
+        if self.device_token:
+            headers["X-Device-Token"] = self.device_token
+        return headers
 
     async def start(self) -> None:
         self.running = True
