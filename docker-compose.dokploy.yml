@@ -18,7 +18,7 @@ services:
   api:
     build:
       context: ./backend/api
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     restart: unless-stopped
     cap_drop:
       - ALL
