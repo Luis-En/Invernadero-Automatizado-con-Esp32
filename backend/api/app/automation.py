@@ -13,8 +13,9 @@ Rules (in order of priority):
 3. Hard limits: every actuator has a maximum continuous ON time.
 """
 
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Deque, Dict, List, Optional
 
 TEMP_MIN_VALID = -10.0
 TEMP_MAX_VALID = 60.0
@@ -29,21 +30,102 @@ DEFAULT_MAX_ON_SECONDS = {
     "pump": 900,
 }
 
+# Minimum OFF time after a max-ON cut. The pump is the critical one: an
+# immediate restart keeps pressure in the line and overheats the motor.
+DEFAULT_MIN_OFF_SECONDS = {
+    "fan": 0,
+    "humidifier": 0,
+    "pump": 300,
+}
+
+# A probe that returns the same value for this many cycles is considered
+# stuck. Eight samples at the 10 s field cadence is 80 s, long enough to
+# ignore normal quantization noise.
+STUCK_SAMPLES = 8
+STUCK_EPSILON = {"temperature": 0.02, "humidity": 0.05, "soil": 0.05}
+
 
 @dataclass
 class ActuatorRuntime:
-    """Tracks how long each actuator has been continuously ON."""
+    """Tracks continuous ON time, max-ON trips and off/cooldown state."""
+
     on_since: Dict[str, float] = field(default_factory=dict)
+    off_since: Dict[str, float] = field(default_factory=dict)
+    limit_blocked: Dict[str, bool] = field(default_factory=dict)
+    limit_recovered: Dict[str, bool] = field(default_factory=dict)
 
     def mark(self, name: str, state: bool, now: float) -> None:
         if state and name not in self.on_since:
             self.on_since[name] = now
         elif not state:
+            if name in self.on_since:
+                self.off_since[name] = now
             self.on_since.pop(name, None)
 
     def elapsed(self, name: str, now: float) -> float:
         start = self.on_since.get(name)
         return (now - start) if start is not None else 0.0
+
+    def cooldown_left(self, name: str, now: float, min_off: float) -> float:
+        if min_off <= 0:
+            return 0.0
+        off_at = self.off_since.get(name)
+        if off_at is None:
+            return 0.0
+        return max(0.0, min_off - (now - off_at))
+
+
+class SensorMonitor:
+    """Detects a frozen probe from the variance of its recent samples.
+
+    A disconnected probe usually reads a rail value, which the validators
+    already reject. A probe that is still connected but frozen (water ingress,
+    stuck ADC, flat battery) keeps producing a plausible value, so only a
+    variance check can catch it.
+    """
+
+    def __init__(self, samples: int = STUCK_SAMPLES,
+                 epsilon: Optional[Dict[str, float]] = None) -> None:
+        self.samples = max(3, samples)
+        self.epsilon = {**STUCK_EPSILON, **(epsilon or {})}
+        self._temperature: Deque[float] = deque(maxlen=self.samples)
+        self._humidity: Deque[float] = deque(maxlen=self.samples)
+        self._soil: List[Deque[float]] = [
+            deque(maxlen=self.samples) for _ in range(6)
+        ]
+        self._stuck = {"temperature": False, "humidity": False, "soil": False}
+
+    def _update_channel(self, name: str, history: Deque[float], value: Optional[float]) -> bool:
+        if value is None:
+            history.clear()
+            self._stuck[name] = False
+            return False
+        history.append(float(value))
+        if len(history) < self.samples:
+            self._stuck[name] = False
+            return False
+        # Soil channels are named soil_0..soil_5 but share the "soil" epsilon.
+        epsilon = self.epsilon.get(name, self.epsilon["soil"])
+        stuck = (max(history) - min(history)) <= epsilon
+        self._stuck[name] = stuck
+        return stuck
+
+    def update(self, temperature: Optional[float], humidity: Optional[float],
+               soil_values: Optional[List[Optional[float]]] = None,
+               valid_flags: Optional[List[bool]] = None) -> None:
+        self._update_channel("temperature", self._temperature, temperature)
+        self._update_channel("humidity", self._humidity, humidity)
+        if soil_values is None:
+            return
+        any_stuck = False
+        for index, value in enumerate(soil_values[:6]):
+            ok = valid_flags[index] if valid_flags and index < len(valid_flags) else True
+            stuck = self._update_channel(f"soil_{index}", self._soil[index], value if ok else None)
+            any_stuck = any_stuck or stuck
+        self._stuck["soil"] = any_stuck
+
+    def stuck(self, name: str) -> bool:
+        return self._stuck.get(name, False)
 
 
 def valid_temperature(value: Optional[float]) -> bool:
@@ -91,6 +173,42 @@ def _hysteresis_decision(
     return current
 
 
+def _apply_safety_limit(
+    name: str,
+    desired: bool,
+    runtime: ActuatorRuntime,
+    now: float,
+    limit: Optional[float],
+    min_off: float,
+) -> bool:
+    """Apply max-ON and cooldown to one actuator.
+
+    After a max-ON cut the actuator stays blocked until both conditions hold:
+    the hysteresis demand recovered (the value crossed the OFF threshold) and
+    the minimum OFF time elapsed. This prevents the 15 min ON / 10 s OFF
+    oscillation the pump had before.
+    """
+    blocked = runtime.limit_blocked.get(name, False)
+
+    if blocked:
+        if not desired:
+            runtime.limit_recovered[name] = True
+        off_at = runtime.off_since.get(name)
+        cooldown_done = off_at is not None and (now - off_at) >= max(0.0, min_off)
+        if runtime.limit_recovered.get(name, False) and cooldown_done:
+            runtime.limit_blocked[name] = False
+            runtime.limit_recovered[name] = False
+        else:
+            return False
+
+    if desired and limit and limit > 0 and runtime.elapsed(name, now) >= limit:
+        runtime.limit_blocked[name] = True
+        runtime.limit_recovered[name] = False
+        return False
+
+    return desired
+
+
 def compute_actuator_states(
     config: dict,
     temperature: Optional[float],
@@ -100,12 +218,23 @@ def compute_actuator_states(
     runtime: ActuatorRuntime,
     now: float,
     manual_override: Optional[Dict[str, bool]] = None,
+    sensor_monitor: Optional[SensorMonitor] = None,
 ) -> Dict[str, bool]:
     """Compute the full actuator state set for one control cycle."""
     hysteresis = config.get("hysteresis", {})
     safety = config.get("safety", {})
     max_on = {**DEFAULT_MAX_ON_SECONDS, **safety.get("max_on_seconds", {})}
+    min_off = {**DEFAULT_MIN_OFF_SECONDS, **safety.get("min_off_seconds", {})}
     irrigation_enabled = config.get("irrigation", {}).get("enabled", False)
+
+    # A frozen-but-plausible probe is treated exactly like a missing one.
+    if sensor_monitor is not None:
+        if sensor_monitor.stuck("temperature"):
+            temperature = None
+        if sensor_monitor.stuck("humidity"):
+            humidity = None
+        if sensor_monitor.stuck("soil"):
+            soil_average = None
 
     temp_hyst = hysteresis.get("temp", {"on_above": 30.0, "off_below": 27.5})
     hum_hyst = hysteresis.get("humidity", {"on_below": 60.0, "off_above": 68.0})
@@ -148,15 +277,18 @@ def compute_actuator_states(
             off_above=soil_hyst.get("off_above_pct", 45),
         )
 
-    # --- Hard maximum ON time ------------------------------------------------
+    # --- Hard maximum ON time + off cooldown --------------------------------
     for name in ("fan_1", "fan_2"):
-        if _exceeds_limit(states, name, max_on["fan"], runtime, now):
-            states[name] = False
+        states[name] = _apply_safety_limit(
+            name, states[name], runtime, now, max_on["fan"], min_off["fan"]
+        )
     for name in ("humidifier_1", "humidifier_2"):
-        if _exceeds_limit(states, name, max_on["humidifier"], runtime, now):
-            states[name] = False
-    if _exceeds_limit(states, "pump", max_on["pump"], runtime, now):
-        states["pump"] = False
+        states[name] = _apply_safety_limit(
+            name, states[name], runtime, now, max_on["humidifier"], min_off["humidifier"]
+        )
+    states["pump"] = _apply_safety_limit(
+        "pump", states["pump"], runtime, now, max_on["pump"], min_off["pump"]
+    )
 
     # --- Manual override (admin) --------------------------------------------
     if manual_override:

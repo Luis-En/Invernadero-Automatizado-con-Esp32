@@ -12,6 +12,7 @@ enum class InboundKind : uint8_t {
   Reboot,
   Purge,
   Ping,
+  SetActuator,
   Unknown,
 };
 
@@ -21,6 +22,9 @@ struct InboundCommand {
   uint32_t epoch = 0;
   uint8_t target = ROLE_FIELD;
   String config_json;
+  char actuator[16] = {0};
+  bool state = false;
+  char command_id[40] = {0};
 };
 
 // Owns the USB serial contract: framing with CRC16, JSON serialization of
@@ -39,6 +43,10 @@ class SerialLink {
   void sendDeviceStatus(const DeviceStatus& status);
   void sendConfigAck(uint16_t version, uint8_t command, uint8_t status, const char* message = nullptr);
   void sendEvent(const char* severity, const char* code, const char* message);
+  // Result of a set_actuator command, correlated by command_id. The Pi bridge
+  // returns this to the API so the web UI gets a real device confirmation.
+  void sendActuatorAck(const char* command_id, const char* actuator, bool state,
+                       const char* status);
 
  private:
   void emit(JsonDocument& doc);

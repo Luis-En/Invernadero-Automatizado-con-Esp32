@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTelemetry } from '../context/TelemetryContext'
 import { api } from '../api'
 import { format } from 'date-fns'
+import { AuthImage } from '../components/AuthImage'
+import { Modal } from '../components/Modal'
+import { formatServerTime } from '../utils/time'
 
 const PAGE_SIZE = 20
 
@@ -61,7 +64,7 @@ export function Photos() {
         <div>
           <h1 className="page-title">Galería de Fotos</h1>
           <p style={{ color: 'var(--color-text-muted)' }}>
-            Fotografías periódicas del cultivo (cada 3 minutos)
+            Fotografías periódicas del cultivo (según la configuración de la cámara)
           </p>
         </div>
         <button onClick={handleRefresh} className="btn btn-primary" disabled={loading}>
@@ -74,8 +77,9 @@ export function Photos() {
           <div className="card-header">📸 Foto más reciente</div>
           <div className="card-body">
             <div style={{ textAlign: 'center' }}>
-              <img
-                src={`${api.getLatestPhotoFile()}?t=${Date.now()}`}
+              <AuthImage
+                key={latestPhoto.id}
+                latest
                 alt="Última foto"
                 style={{
                   maxWidth: '100%',
@@ -87,7 +91,7 @@ export function Photos() {
                 onClick={() => setSelectedPhoto(latestPhoto)}
               />
               <p style={{ marginTop: '0.75rem', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                Tomada: {format(new Date(latestPhoto.timestamp), 'dd/MM/yyyy HH:mm:ss')}
+                Tomada: {formatServerTime(latestPhoto.timestamp, d => format(d, 'dd/MM/yyyy HH:mm:ss'))}
               </p>
             </div>
           </div>
@@ -96,16 +100,21 @@ export function Photos() {
 
       <div className="photo-grid">
         {photos.map(photo => (
-          <div key={photo.id} className="photo-card" onClick={() => setSelectedPhoto(photo)}>
-            <img
-              src={api.getPhotoFile(photo.id)}
+          <button
+            key={photo.id}
+            type="button"
+            className="photo-card"
+            onClick={() => setSelectedPhoto(photo)}
+            aria-label={`Ver foto del ${formatServerTime(photo.timestamp, d => format(d, 'dd/MM/yyyy HH:mm'))}`}
+          >
+            <AuthImage
+              photoId={photo.id}
               alt={photo.filename}
-              loading="lazy"
             />
-            <div className="photo-overlay">
-              {format(new Date(photo.timestamp), 'dd/MM/yyyy HH:mm')}
+            <div className="photo-overlay" aria-hidden="true">
+              {formatServerTime(photo.timestamp, d => format(d, 'dd/MM/yyyy HH:mm'))}
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -124,27 +133,28 @@ export function Photos() {
         </div>
       )}
 
-      {selectedPhoto && (
-        <div className="modal-overlay" onClick={() => setSelectedPhoto(null)}>
-          <div className="modal" style={{ maxWidth: '90vw', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">{selectedPhoto.filename}</h3>
-              <button onClick={() => setSelectedPhoto(null)} style={{ fontSize: '1.5rem', lineHeight: 1, color: 'var(--color-text-muted)' }}>×</button>
-            </div>
-            <div className="modal-body" style={{ padding: 0, textAlign: 'center' }}>
-              <img
-                src={api.getPhotoFile(selectedPhoto.id)}
-                alt={selectedPhoto.filename}
-                style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 'var(--radius-md)' }}
-              />
-              <div style={{ padding: '1rem', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                {format(new Date(selectedPhoto.timestamp), 'dd/MM/yyyy HH:mm:ss')}
-                {selectedPhoto.size_bytes ? ` · ${(selectedPhoto.size_bytes / 1024).toFixed(1)} KB` : ''}
-              </div>
+      <Modal
+        open={Boolean(selectedPhoto)}
+        onClose={() => setSelectedPhoto(null)}
+        title={selectedPhoto?.filename || 'Foto'}
+        size="xl"
+      >
+        {selectedPhoto && (
+          <div style={{ textAlign: 'center' }}>
+            <AuthImage
+              photoId={selectedPhoto.id}
+              alt={selectedPhoto.filename}
+              style={{ maxWidth: '100%', maxHeight: '65dvh', borderRadius: 'var(--radius-md)' }}
+            />
+            <div style={{ padding: '0.75rem 0', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+              {formatServerTime(selectedPhoto.timestamp, d => format(d, 'dd/MM/yyyy HH:mm:ss'))}
+              {selectedPhoto.size_bytes
+                ? ` · ${(selectedPhoto.size_bytes / 1024).toFixed(1)} KB`
+                : ''}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   )
 }

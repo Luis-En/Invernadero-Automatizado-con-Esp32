@@ -31,8 +31,18 @@ class EspNowHal {
   };
 
   bool begin(uint8_t channel = 1, uint8_t mode_hint = MODE_KEEP_STA);
+
+  // Enable ESP-NOW encryption. Must be called before sending/receiving to a
+  // peer; the PMK is global and the LMK is installed per peer. Broadcast
+  // frames stay unencrypted by design, so unicast is preferred for payloads.
+  bool setSecurity(const uint8_t pmk[16], const uint8_t lmk[16]);
+  bool secure() const { return secure_; }
+
   bool send(const uint8_t* mac, const uint8_t* data, size_t length);
   bool sendBroadcast(const uint8_t* data, size_t length);
+  // Install a fixed peer (and its LMK when security is enabled) before the
+  // first encrypted exchange.
+  bool preparePeer(const uint8_t* mac) { return addPeer(mac); }
   bool poll(EspNowMessage& out, uint32_t timeoutMs = 0);
 
   const uint8_t* ownMac() const { return own_mac_; }
@@ -52,6 +62,8 @@ class EspNowHal {
   static EspNowHal* instance_;
   uint8_t channel_ = 1;
   uint8_t own_mac_[6] = {0};
+  uint8_t lmk_[16] = {0};
+  bool secure_ = false;
   uint16_t seq_ = 0;
   volatile bool last_send_ok_ = true;
   volatile uint32_t dropped_ = 0;

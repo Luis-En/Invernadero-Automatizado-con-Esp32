@@ -1,5 +1,8 @@
 # Field node firmware (ESP32)
 
+> **The field node only speaks ESP-NOW** (optionally encrypted with PMK/LMK).
+> It never stores Wi-Fi router or broker credentials.
+
 Reads the 6 capacitive soil probes and the BME280, drives the 5 actuators and
 runs the automation/fail-safe loop. Because the control logic lives here, the
 greenhouse keeps working when the gateway or the Raspberry Pi go down: the last
@@ -18,7 +21,7 @@ field/
 │   ├── actuators.h         # 5 output pins
 │   ├── persistence.h       # NVS (Preferences) config + calibration
 │   ├── field_link.h        # ESP-NOW commands / telemetry / config push
-│   └── photo_link.h        # camera UART -> ESP-NOW photo forwarding
+│   └── wifi_photo.h        # camera Wi-Fi AP -> ESP-NOW photo forwarding
 ├── src/                    # one .cpp per header
 └── tools/
     ├── Arduino.h           # host shim for the logic tests
@@ -47,6 +50,24 @@ Unicast: a field learns the gateway MAC from the first command it receives
 (the Pi's periodic timesync) and from then on sends telemetry and photo
 fragments unicast. ESP-NOW then ACKs and retransmits each frame, which is what
 stops fragments from being lost at 50 m. Until the MAC is known it broadcasts.
+
+### If the build resets with a brownout
+
+`Brownout detector was triggered` immediately after the boot banner means the
+3.3 V rail collapses when the radio starts; it is a power problem, not a
+firmware one. Check, in this order:
+
+1. A short, thick USB data+power cable, on a direct port (no unpowered hub).
+2. A 5 V / 2 A supply into the 5 V pin (never feed 5 V into 3.3 V), common
+   ground, plus a 470–1000 µF electrolytic across 5 V/GND and 100 nF near the
+   board.
+3. The board's 3.3 V regulator (AMS1117 or clone): a board that only browns out
+   under radio load usually has a weak regulator, a bad bulk capacitor or a
+   high-resistance cable. Replace the board/regulator if a known-good 5 V
+   supply still shows the reset.
+
+The field node sends telemetry only over ESP-NOW. Its USB port is a local
+console for debug output and the `CAL` commands, not a telemetry transport.
 
 ## Soil calibration (3.3 V)
 

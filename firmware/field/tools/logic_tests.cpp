@@ -109,6 +109,7 @@ int main() {
     run(config, impossible, state, 2000);
     // 999 is out of the physical range, so it is treated as invalid.
     // decideHigh would otherwise keep it on; the validity guard must win.
+    EXPECT(!state.fan_1, "impossible temperature forces fan off");
   }
 
   {
@@ -134,6 +135,19 @@ int main() {
     EXPECT(state.pump, "pump on before limit");
     run(config, dry, state, 901000);
     EXPECT(!state.pump, "pump cut after max ON time");
+
+    // Still dry: the pump must stay off until the soil crosses the OFF
+    // threshold (hysteresis recovered) and the minimum OFF time elapsed.
+    run(config, dry, state, 1300000);
+    EXPECT(!state.pump, "pump does not restart while hysteresis is not recovered");
+
+    SensorSnapshot wet = snapshot(25.0f, 70.0f, 50.0f);
+    run(config, wet, state, 1301000);
+    EXPECT(!state.pump, "wet soil keeps pump off and marks hysteresis recovered");
+
+    // Now the demand is real again and the cooldown has passed.
+    run(config, dry, state, 1302000);
+    EXPECT(state.pump, "pump restarts after recovery and min OFF time");
   }
 
   // --- Config parsing and validation -------------------------------------

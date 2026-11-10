@@ -15,11 +15,23 @@ static float readFloat(JsonVariantConst value, float fallback) {
   return fallback;
 }
 
-static uint32_t readSeconds(JsonVariantConst value, uint32_t fallback) {
-  if (value.is<unsigned long>() || value.is<long>() || value.is<int>()) {
-    return value.as<uint32_t>();
+// Seconds are bounded so a negative value can never wrap to ~49 days and a
+// zero means "use the default", never "unlimited".
+static bool readSeconds(JsonVariantConst value, uint32_t fallback, uint32_t& out) {
+  if (value.isNull()) {
+    out = fallback;
+    return true;
   }
-  return fallback;
+  if (!(value.is<int>() || value.is<long>() || value.is<unsigned long>() ||
+        value.is<long long>() || value.is<unsigned long long>())) {
+    return false;
+  }
+  long long raw = value.as<long long>();
+  if (raw < 0 || raw > 86400LL) {
+    return false;
+  }
+  out = (raw == 0) ? fallback : (uint32_t)raw;
+  return true;
 }
 
 bool RuntimeConfig::fromJson(const char* json, size_t length) {
@@ -75,9 +87,20 @@ bool RuntimeConfig::fromJsonDocument(JsonVariantConst root) {
 
   JsonVariantConst safety = root["safety"]["max_on_seconds"];
   if (!safety.isNull()) {
-    next.max_on_fan_s = readSeconds(safety["fan"], next.max_on_fan_s);
-    next.max_on_humidifier_s = readSeconds(safety["humidifier"], next.max_on_humidifier_s);
-    next.max_on_pump_s = readSeconds(safety["pump"], next.max_on_pump_s);
+    if (!readSeconds(safety["fan"], next.max_on_fan_s, next.max_on_fan_s) ||
+        !readSeconds(safety["humidifier"], next.max_on_humidifier_s, next.max_on_humidifier_s) ||
+        !readSeconds(safety["pump"], next.max_on_pump_s, next.max_on_pump_s)) {
+      return false;
+    }
+  }
+
+  JsonVariantConst minOff = root["safety"]["min_off_seconds"];
+  if (!minOff.isNull()) {
+    if (!readSeconds(minOff["fan"], next.min_off_fan_s, next.min_off_fan_s) ||
+        !readSeconds(minOff["humidifier"], next.min_off_humidifier_s, next.min_off_humidifier_s) ||
+        !readSeconds(minOff["pump"], next.min_off_pump_s, next.min_off_pump_s)) {
+      return false;
+    }
   }
 
   if (!next.valid()) {
@@ -97,6 +120,28 @@ bool RuntimeConfig::valid() const {
     return false;
   }
   if (soil.on >= soil.off) {
+    return false;
+  }
+
+  // Physical bounds. A value outside these ranges is a configuration bug,
+  // not a plausible setpoint.
+  if (temp.on < -10.0f || temp.on > 60.0f || temp.off < -10.0f || temp.off > 60.0f) {
+    return false;
+  }
+  if (humidity.on < 0.0f || humidity.on > 100.0f ||
+      humidity.off < 0.0f || humidity.off > 100.0f) {
+    return false;
+  }
+  if (soil.on < 0.0f || soil.on > 100.0f ||
+      soil.off < 0.0f || soil.off > 100.0f) {
+    return false;
+  }
+  if (max_on_fan_s > 86400UL || max_on_humidifier_s > 86400UL ||
+      max_on_pump_s > 86400UL) {
+    return false;
+  }
+  if (min_off_fan_s > 86400UL || min_off_humidifier_s > 86400UL ||
+      min_off_pump_s > 86400UL) {
     return false;
   }
   return true;
@@ -126,6 +171,10 @@ String RuntimeConfig::toJson() const {
   maxOn["fan"] = max_on_fan_s;
   maxOn["humidifier"] = max_on_humidifier_s;
   maxOn["pump"] = max_on_pump_s;
+  JsonObject minOff = safety.createNestedObject("min_off_seconds");
+  minOff["fan"] = min_off_fan_s;
+  minOff["humidifier"] = min_off_humidifier_s;
+  minOff["pump"] = min_off_pump_s;
 
   String out;
   serializeJson(doc, out);

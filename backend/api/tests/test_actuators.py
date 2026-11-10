@@ -1,6 +1,6 @@
 from unittest.mock import patch
 import pytest
-from app.mqtt_commands import CommandTimeout, CommandUnavailable, CommandRejected
+from app.serial_commands import CommandTimeout, CommandUnavailable, CommandRejected
 
 
 async def test_command_requires_admin(client, auth_viewer):

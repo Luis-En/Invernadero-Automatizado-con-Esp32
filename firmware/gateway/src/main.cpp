@@ -19,6 +19,31 @@ uint32_t last_heartbeat_ms = 0;
 uint32_t boot_ms = 0;
 uint32_t last_photo_ms = 0;
 
+// Actuator command sent over serial and awaiting the field's ESP-NOW ACK.
+struct SerialActuatorPending {
+  bool active = false;
+  char command_id[40] = {0};
+  char actuator[16] = {0};
+  bool state = false;
+  uint16_t seq = 0;
+  uint32_t sent_ms = 0;
+};
+SerialActuatorPending serial_actuator;
+
+const char* const kActuatorNames[ACT_COUNT] = {
+    "fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"};
+
+int8_t actuatorIndex(const char* name) {
+  for (uint8_t i = 0; i < ACT_COUNT; i++) {
+    if (strcmp(name, kActuatorNames[i]) == 0) {
+      return (int8_t)i;
+    }
+  }
+  return -1;
+}
+uint32_t last_discovery_ms = 0;
+constexpr uint32_t kDiscoveryIntervalMs = 10000UL;
+
 #if GW_SIMULATE
 uint16_t sim_photo_sequence = 0;
 uint16_t sim_photo_total = 0;
@@ -31,6 +56,43 @@ void fillHeader(EspNowHeader& header, uint8_t type) {
   header.type = type;
   memcpy(header.src, espNow.ownMac(), 6);
   header.seq = espNow.nextSeq();
+}
+
+void emitEvent(const char* severity, const char* code, const char* message) {
+  serialLink.sendEvent(severity, code, message);
+}
+
+bool sendActuatorCommand(uint8_t index, bool state, uint16_t& out_seq) {
+  if (index >= ACT_COUNT) {
+    return false;
+  }
+  uint8_t mac[6];
+  if (!registry.macForRole(ROLE_FIELD, mac)) {
+    // No unicast peer yet: broadcast so a freshly booted field node still
+    // receives the command, but report it can be lost.
+    memcpy(mac, ESPNOW_BROADCAST_MAC, 6);
+  }
+
+  CommandMsg msg;
+  memset(&msg, 0, sizeof(msg));
+  fillHeader(msg.hdr, MSG_COMMAND);
+  msg.cmd = CMD_SET_ACTUATOR;
+  msg.index = index;
+  msg.arg = state ? 1 : 0;
+  out_seq = msg.hdr.seq;
+  return espNow.send(mac, (const uint8_t*)&msg, sizeof(msg));
+}
+
+// Discovery frame. Broadcast is unencrypted by design, but it carries no
+// secret. It lets a field node learn (and pin) the gateway MAC and install its
+// LMK before the first encrypted unicast command, without hardcoding the MAC
+// in every field build.
+void sendDiscoveryPing() {
+  CommandMsg msg;
+  memset(&msg, 0, sizeof(msg));
+  fillHeader(msg.hdr, MSG_COMMAND);
+  msg.cmd = CMD_PING;
+  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
 }
 
 void sendCommand(uint8_t targetRole, uint8_t command, uint16_t version, uint32_t arg) {
@@ -53,10 +115,10 @@ void onConfigResult(bool ok, uint16_t version) {
   if (ok) {
     state.setConfigVersion(version);
     serialLink.sendConfigAck(version, CMD_SET_CONFIG_COMMIT, 0, "applied by field node");
-    serialLink.sendEvent("info", "CONFIG_APPLIED", "Field node confirmed the new configuration");
+    emitEvent("info", "CONFIG_APPLIED", "Field node confirmed the new configuration");
   } else {
     serialLink.sendConfigAck(version, CMD_SET_CONFIG_COMMIT, 1, "field node did not acknowledge");
-    serialLink.sendEvent("warning", "CONFIG_TIMEOUT", "Field node did not confirm the configuration");
+    emitEvent("warning", "CONFIG_TIMEOUT", "Field node did not confirm the configuration");
   }
 }
 
@@ -84,7 +146,7 @@ void onInboundCommand(const InboundCommand& command) {
       break;
     case InboundKind::Reboot:
       if (command.target == ROLE_GATEWAY) {
-        serialLink.sendEvent("info", "GATEWAY_REBOOT", "Rebooting gateway on request");
+        emitEvent("info", "GATEWAY_REBOOT", "Rebooting gateway on request");
         delay(100);
         ESP.restart();
       }
@@ -96,8 +158,33 @@ void onInboundCommand(const InboundCommand& command) {
     case InboundKind::Ping:
       serialLink.sendHello();
       break;
+    case InboundKind::SetActuator: {
+      const int8_t index = actuatorIndex(command.actuator);
+      if (index < 0) {
+        serialLink.sendActuatorAck(command.command_id, command.actuator, command.state, "rejected");
+        break;
+      }
+      if (serial_actuator.active) {
+        serialLink.sendActuatorAck(command.command_id, command.actuator, command.state, "busy");
+        break;
+      }
+      uint16_t seq = 0;
+      if (!sendActuatorCommand((uint8_t)index, command.state, seq)) {
+        serialLink.sendActuatorAck(command.command_id, command.actuator, command.state, "rejected");
+        break;
+      }
+      serial_actuator.active = true;
+      strncpy(serial_actuator.command_id, command.command_id, sizeof(serial_actuator.command_id) - 1);
+      serial_actuator.command_id[sizeof(serial_actuator.command_id) - 1] = '\0';
+      strncpy(serial_actuator.actuator, command.actuator, sizeof(serial_actuator.actuator) - 1);
+      serial_actuator.actuator[sizeof(serial_actuator.actuator) - 1] = '\0';
+      serial_actuator.state = command.state;
+      serial_actuator.seq = seq;
+      serial_actuator.sent_ms = millis();
+      break;
+    }
     default:
-      serialLink.sendEvent("warning", "CMD_UNKNOWN", "Unrecognized serial command");
+      emitEvent("warning", "CMD_UNKNOWN", "Unrecognized serial command");
       break;
   }
 }
@@ -168,12 +255,24 @@ void handleHello(const EspNowMessage& frame) {
   deviceId[sizeof(msg.device_id)] = '\0';
 
   registry.update(frame.mac, msg.role, deviceId, frame.rssi, state.now());
+  // Install the peer (with its LMK when encryption is enabled) before any
+  // unicast frame is exchanged.
+  espNow.preparePeer(frame.mac);
 }
 
 void handleAck(const EspNowMessage& frame) {
   AckMsg msg;
   memcpy(&msg, frame.data, sizeof(msg));
   configPusher.onAck(msg.cmd, msg.status, msg.version);
+
+  // Confirm a manual actuator command back to the Pi over serial.
+  if (serial_actuator.active && msg.cmd == CMD_SET_ACTUATOR &&
+      msg.ack_seq == serial_actuator.seq) {
+    serialLink.sendActuatorAck(serial_actuator.command_id, serial_actuator.actuator,
+                               serial_actuator.state,
+                               msg.status == 0 ? "applied" : "rejected");
+    serial_actuator.active = false;
+  }
 }
 
 void handleEvent(const EspNowMessage& frame) {
@@ -195,7 +294,7 @@ void handleEvent(const EspNowMessage& frame) {
   }
 
   // Forward as a backend event so it shows in the web Events page.
-  serialLink.sendEvent(severity, code, message);
+  emitEvent(severity, code, message);
 
 #if GW_DEBUG_PEERS
   Serial.printf("# [gw] event from %02X:%02X:%02X:%02X:%02X:%02X rssi=%d %s: %s\n",
@@ -267,21 +366,22 @@ void tickHeartbeat() {
     return;
   }
   last_heartbeat_ms = millis();
-  serialLink.sendDeviceStatus(buildStatus());
+  const DeviceStatus status = buildStatus();
+  serialLink.sendDeviceStatus(status);
 
   bool fieldOnline = registry.isOnline(ROLE_FIELD, millis(), GW_DEVICE_TIMEOUT_MS);
   if (field_was_online && !fieldOnline) {
-    serialLink.sendEvent("critical", "FIELD_OFFLINE", "Field ESP32 not seen for over 5 minutes");
+    emitEvent("critical", "FIELD_OFFLINE", "Field ESP32 not seen for over 5 minutes");
   } else if (!field_was_online && fieldOnline) {
-    serialLink.sendEvent("info", "FIELD_ONLINE", "Field ESP32 is online");
+    emitEvent("info", "FIELD_ONLINE", "Field ESP32 is online");
   }
   field_was_online = fieldOnline;
 
   bool cameraOnline = registry.isOnline(ROLE_CAMERA, millis(), GW_DEVICE_TIMEOUT_MS);
   if (camera_was_online && !cameraOnline) {
-    serialLink.sendEvent("warning", "CAMERA_OFFLINE", "Camera not seen for over 5 minutes");
+    emitEvent("warning", "CAMERA_OFFLINE", "Camera not seen for over 5 minutes");
   } else if (!camera_was_online && cameraOnline) {
-    serialLink.sendEvent("info", "CAMERA_ONLINE", "Camera is online");
+    emitEvent("info", "CAMERA_ONLINE", "Camera is online");
   }
   camera_was_online = cameraOnline;
 }
@@ -320,8 +420,25 @@ void setup() {
   state.begin();
   registry.begin();
   if (!espNow.begin(GW_WIFI_CHANNEL)) {
-    serialLink.sendEvent("critical", "ESPNOW_INIT", "ESP-NOW initialization failed");
+    emitEvent("critical", "ESPNOW_INIT", "ESP-NOW initialization failed");
   }
+  {
+    const uint8_t* mac = espNow.ownMac();
+    Serial.printf("[gw] own MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  }
+#if defined(ESPNOW_PMK) && defined(ESPNOW_LMK)
+  {
+    const uint8_t pmk[16] = ESPNOW_PMK;
+    const uint8_t lmk[16] = ESPNOW_LMK;
+    if (!espNow.setSecurity(pmk, lmk)) {
+      emitEvent("warning", "ESPNOW_SECURITY", "ESP-NOW encryption could not be enabled");
+    }
+  }
+#endif
+
+  sendDiscoveryPing();
+  last_discovery_ms = millis();
 
   configPusher.begin(&espNow);
   configPusher.setResultCallback(onConfigResult);
@@ -332,11 +449,24 @@ void setup() {
 #endif
 
   serialLink.sendHello();
-  serialLink.sendEvent("info", "GATEWAY_BOOT", "Gateway started");
+  emitEvent("info", "GATEWAY_BOOT", "Gateway started");
 }
 
 void loop() {
   serialLink.poll();
+
+  // A manual actuator command that the field never acknowledged must not stay
+  // pending forever: report a timeout so the Pi can tell the operator.
+  if (serial_actuator.active && (millis() - serial_actuator.sent_ms) >= 5000UL) {
+    serialLink.sendActuatorAck(serial_actuator.command_id, serial_actuator.actuator,
+                               serial_actuator.state, "timeout");
+    serial_actuator.active = false;
+  }
+
+  if (millis() - last_discovery_ms >= kDiscoveryIntervalMs) {
+    last_discovery_ms = millis();
+    sendDiscoveryPing();
+  }
 
   EspNowMessage frame;
   while (espNow.poll(frame, 0)) {

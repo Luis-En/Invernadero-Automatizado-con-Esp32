@@ -9,12 +9,14 @@ Run: `python simulator.py`
 """
 import asyncio
 import binascii
+import importlib.util
 import logging
 import os
 import random
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 
@@ -24,6 +26,34 @@ logger = logging.getLogger("simulator")
 CHUNK_SIZE = 200
 JPEG_HEADER = bytes.fromhex("FFD8FFE000104A46494600010100000100010000")
 JPEG_FOOTER = bytes.fromhex("FFD9")
+
+
+def _load_control_reference():
+    """Load the API's automation.py as the single control reference.
+
+    The module only uses the standard library, so importing it by path avoids
+    making serial_bridge depend on the FastAPI app. docker-compose mounts the
+    same file as automation_reference.py for the container layout.
+    """
+    candidates = [
+        Path(__file__).with_name("automation_reference.py"),
+        Path(__file__).resolve().parents[1] / "api" / "app" / "automation.py",
+    ]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        spec = importlib.util.spec_from_file_location("greenhouse_automation", candidate)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+    raise RuntimeError(
+        "automation.py not found; mount backend/api/app/automation.py or run "
+        "from the repository layout"
+    )
+
+
+control = _load_control_reference()
 
 
 @dataclass
@@ -70,6 +100,9 @@ class Simulator:
         self.base_humidity = 72.0
         self.base_pressure = 1013.25
         self.soil_base = [45, 42, 48, 40, 44, 38]
+        self.actuator_runtime = control.ActuatorRuntime()
+        self.sensor_monitor = control.SensorMonitor()
+        self.started_at = time.monotonic()
 
     def _default_config(self) -> dict:
         return {
@@ -124,36 +157,26 @@ class Simulator:
         )
 
     def _apply_automation(self, soil_sensors):
-        hyst = self.config.get("hysteresis", {})
-        irrigation_enabled = self.config.get("irrigation", {}).get("enabled", False)
-
-        temp_hyst = hyst.get("temp", {"on_above": 30.0, "off_below": 27.5})
-        hum_hyst = hyst.get("humidity", {"on_below": 60.0, "off_above": 68.0})
-        soil_hyst = hyst.get("soil", {"on_below_pct": 35, "off_above_pct": 45})
-
-        manual = self.config.get("manual_override", {})
-
-        if self.base_temp >= temp_hyst["on_above"]:
-            self.actuators["fan_1"] = self.actuators["fan_2"] = True
-        elif self.base_temp <= temp_hyst["off_below"]:
-            self.actuators["fan_1"] = self.actuators["fan_2"] = False
-
-        if self.base_humidity <= hum_hyst["on_below"]:
-            self.actuators["humidifier_1"] = self.actuators["humidifier_2"] = True
-        elif self.base_humidity >= hum_hyst["off_above"]:
-            self.actuators["humidifier_1"] = self.actuators["humidifier_2"] = False
-
-        valid_soil = [s.pct for s in soil_sensors if s.ok]
-        avg_soil = sum(valid_soil) / len(valid_soil) if valid_soil else 50
-
-        if irrigation_enabled and avg_soil <= soil_hyst["on_below_pct"]:
-            self.actuators["pump"] = True
-        elif avg_soil >= soil_hyst["off_above_pct"]:
-            self.actuators["pump"] = False
-
-        for name, value in manual.items():
-            if name in self.actuators and isinstance(value, bool):
-                self.actuators[name] = value
+        # The API's automation.py is the single source of truth. The simulator
+        # no longer keeps a second, drifting copy of the control rules.
+        values = [sensor.pct for sensor in soil_sensors]
+        flags = [sensor.ok for sensor in soil_sensors]
+        self.sensor_monitor.update(
+            self.base_temp, self.base_humidity, values, flags
+        )
+        avg_soil = control.soil_average(values, flags)
+        states = control.compute_actuator_states(
+            self.config,
+            temperature=self.base_temp,
+            humidity=self.base_humidity,
+            soil_average=avg_soil,
+            current_states=self.actuators,
+            runtime=self.actuator_runtime,
+            now=time.monotonic() - self.started_at,
+            manual_override=self.config.get("manual_override"),
+            sensor_monitor=self.sensor_monitor,
+        )
+        self.actuators.update(states)
 
     def should_send_photo(self) -> bool:
         now = time.time()

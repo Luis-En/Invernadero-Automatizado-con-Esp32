@@ -44,6 +44,10 @@ class WifiPhotoReceiver {
   // Called by the raw HTTP handler for each chunk of the POST body.
   void handleRaw(const HTTPRaw& raw);
 
+  // Result of the last upload; the HTTP handler uses it to answer 200 or 503
+  // instead of acknowledging a body that was dropped.
+  bool lastUploadAccepted() const { return last_upload_accepted_; }
+
  private:
   static uint16_t nextSequence();
 
@@ -65,6 +69,7 @@ class WifiPhotoReceiver {
   uint32_t frames_received_ = 0;
   uint32_t frames_rejected_ = 0;
   uint32_t chunks_forwarded_ = 0;
+  bool last_upload_accepted_ = false;
 
   static const size_t kBufferMax = FIELD_PHOTO_BUFFER_MAX;
   uint8_t* buffers_[2] = {nullptr, nullptr};

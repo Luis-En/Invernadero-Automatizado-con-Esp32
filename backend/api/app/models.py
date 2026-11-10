@@ -1,5 +1,6 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, JSON
+    Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, JSON,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship, backref
 from datetime import datetime
@@ -174,3 +175,65 @@ class Device(Base):
     config_version = Column(Integer, nullable=True)
     is_online = Column(Boolean, default=False)
     device_metadata = Column(JSON, nullable=True)
+
+
+class PushSubscription(Base):
+    """Browser Web Push endpoint owned by a user.
+
+    One row per browser/device. Endpoints are unique and are deactivated (not
+    deleted) when the push service reports 404/410, so a re-subscribe can
+    reactivate the same row.
+    """
+
+    __tablename__ = "push_subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = Column(String(500), unique=True, index=True, nullable=False)
+    p256dh = Column(String(200), nullable=False)
+    auth = Column(String(100), nullable=False)
+    user_agent = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    user = relationship("User")
+
+
+class AuthThrottle(Base):
+    """Failed-login counter for one scope (IP or username).
+
+    Kept in SQLite so a process restart cannot be used to reset the lockout.
+    Rows older than a few days are pruned during successful logins.
+    """
+
+    __tablename__ = "auth_throttle"
+    id = Column(Integer, primary_key=True, index=True)
+    scope = Column(String(16), nullable=False)
+    key = Column(String(255), nullable=False)
+    failures = Column(Integer, default=0, nullable=False)
+    window_start = Column(DateTime, default=datetime.utcnow, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("scope", "key", name="uq_auth_throttle_scope_key"),
+    )
+
+
+class AuditLog(Base):
+    """Immutable trail of security-sensitive and administrative actions."""
+
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    username = Column(String(50), nullable=True, index=True)
+    action = Column(String(64), nullable=False, index=True)
+    resource = Column(String(160), nullable=False)
+    ip = Column(String(64), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+    details = Column(JSON, nullable=True)
+
+    user = relationship("User")

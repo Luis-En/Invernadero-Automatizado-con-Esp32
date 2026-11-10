@@ -20,6 +20,9 @@ bool first_capture_done = false;
 bool have_uploaded_once = false;
 uint32_t failed_attempts = 0;
 uint16_t last_frame_bytes = 0;
+volatile bool capture_requested = false;
+uint32_t last_camera_retry_ms = 0;
+constexpr uint32_t kCameraRetryMs = 30000UL;
 
 void printBanner() {
   Serial.println();
@@ -78,6 +81,23 @@ bool captureAndSend() {
   return false;
 }
 
+// Capture and upload run in their own task. HTTPClient can block for seconds
+// on a weak AP, and the main loop must keep servicing the watchdog and the
+// camera retry timers.
+void cameraTask(void*) {
+  while (true) {
+    if (capture_requested && camera.ready()) {
+      capture_requested = false;
+      if (captureAndSend()) {
+        have_uploaded_once = true;
+      } else {
+        failed_attempts++;
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -90,6 +110,8 @@ void setup() {
   photoSender.begin();
   printBanner();
   last_heartbeat_ms = millis();
+  xTaskCreatePinnedToCore(cameraTask, "camera_task", 8192, nullptr, 1,
+                          nullptr, 1);
 }
 
 void loop() {
@@ -109,14 +131,17 @@ void loop() {
     due = true;
   }
 
+  if (!camera.ready() && (now_ms - last_camera_retry_ms) >= kCameraRetryMs) {
+    last_camera_retry_ms = now_ms;
+    Serial.println("[camera] retrying camera initialization");
+    camera.begin();
+    printBanner();
+  }
+
   if (due && camera.ready()) {
     last_capture_ms = now_ms;
     first_capture_done = true;
-    if (captureAndSend()) {
-      have_uploaded_once = true;
-    } else {
-      failed_attempts++;
-    }
+    capture_requested = true;
   }
 
   if (now_ms - last_heartbeat_ms >= kHeartbeatIntervalMs) {

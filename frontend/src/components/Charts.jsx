@@ -1,5 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { format } from 'date-fns'
+import { parseServerTime } from '../utils/time'
 
 const COLORS = {
   temperature: '#e53935',
@@ -8,29 +9,37 @@ const COLORS = {
 }
 
 function formatTick(value) {
-  if (!value) return ''
-  try {
-    return format(new Date(value), 'HH:mm')
-  } catch {
-    return ''
-  }
+  const date = parseServerTime(value)
+  if (!date || Number.isNaN(date.getTime())) return ''
+  return format(date, 'HH:mm')
 }
 
 function formatLabel(value) {
-  if (!value) return ''
-  try {
-    return format(new Date(value), 'dd/MM HH:mm')
-  } catch {
-    return ''
-  }
+  const date = parseServerTime(value)
+  if (!date || Number.isNaN(date.getTime())) return ''
+  return format(date, 'dd/MM HH:mm')
 }
 
-function EmptyChart() {
+function EmptyChart({ label = 'Sin datos' }) {
   return (
-    <div className="chart-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
-      Sin datos
+    <div
+      className="chart-container"
+      role="img"
+      aria-label={label}
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}
+    >
+      {label}
     </div>
   )
+}
+
+function seriesSummary(values, unit, name) {
+  const usable = values.filter(value => value !== null && value !== undefined && !Number.isNaN(value))
+  if (!usable.length) return `${name}: sin datos`
+  const latest = usable[usable.length - 1]
+  const min = Math.min(...usable)
+  const max = Math.max(...usable)
+  return `${name}: último valor ${latest.toFixed(1)}${unit}, mínimo ${min.toFixed(1)}${unit}, máximo ${max.toFixed(1)}${unit}`
 }
 
 export function TemperatureChart({ data }) {
@@ -43,7 +52,11 @@ export function TemperatureChart({ data }) {
   if (!chartData.length) return <EmptyChart />
 
   return (
-    <div className="chart-container">
+    <div
+      className="chart-container"
+      role="img"
+      aria-label={seriesSummary(chartData.map(point => point.value), ' grados Celsius', 'Temperatura')}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -80,7 +93,11 @@ export function HumidityChart({ data }) {
   if (!chartData.length) return <EmptyChart />
 
   return (
-    <div className="chart-container">
+    <div
+      className="chart-container"
+      role="img"
+      aria-label={seriesSummary(chartData.map(point => point.value), ' por ciento', 'Humedad ambiental')}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -119,8 +136,20 @@ export function SoilMoistureChart({ data }) {
     return obj
   })
 
+  const summary = labels
+    .map((label, index) => {
+      const values = chartData.map(point => point[sensors[index]])
+      const usable = values.filter(value => value !== null && value !== undefined)
+      return usable.length ? `${label} ${usable[usable.length - 1].toFixed(0)}%` : `${label} sin datos`
+    })
+    .join(', ')
+
   return (
-    <div className="chart-container">
+    <div
+      className="chart-container"
+      role="img"
+      aria-label={`Humedad del suelo por sensor: ${summary}`}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
@@ -140,6 +169,7 @@ export function SoilMoistureChart({ data }) {
               stroke={COLORS.soil}
               strokeWidth={1.5}
               dot={false}
+              connectNulls
               strokeDasharray={i >= 3 ? '5 5' : '0'}
               activeDot={{ r: 5 }}
               name={labels[i]}

@@ -1,11 +1,23 @@
 """Automation and fail-safe logic tests (pure functions, no HTTP)."""
 from app.automation import (
     ActuatorRuntime,
+    SensorMonitor,
     compute_actuator_states,
     soil_average,
     valid_soil,
     valid_temperature,
 )
+
+
+def test_sensor_monitor_soil_channels_use_shared_epsilon():
+    # Regression: after eight samples per soil channel the reference monitor
+    # raised KeyError("soil_0") because only the "soil" epsilon key existed.
+    monitor = SensorMonitor()
+    for _ in range(8):
+        monitor.update(25.0, 70.0, [40.0, 41.0, 42.0, 43.0, 44.0, 45.0], [True] * 6)
+    # Constant channels are correctly flagged as frozen, and no KeyError is
+    # raised while classifying the six soil channels.
+    assert monitor.stuck("soil") is True
 
 BASE_CONFIG = {
     "hysteresis": {

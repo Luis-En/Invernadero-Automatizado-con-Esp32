@@ -173,17 +173,20 @@ export function Weather() {
           <div className="card" style={{ marginBottom: '1.5rem' }}>
             <div className="card-header">Detalle por horas</div>
             <div className="card-body">
-              <div className="weather-table-wrap">
+              <div className="weather-table-wrap" tabIndex={0} role="region" aria-label="Pronóstico detallado por horas">
                 <table className="weather-table">
+                  <caption className="visually-hidden">
+                    Pronóstico por horas: temperatura, probabilidad y cantidad de lluvia, humedad y viento
+                  </caption>
                   <thead>
                     <tr>
-                      <th>Hora</th>
-                      <th>Clima</th>
-                      <th>Temp.</th>
-                      <th>Prob. lluvia</th>
-                      <th>Lluvia</th>
-                      <th>Humedad</th>
-                      <th>Viento</th>
+                      <th scope="col">Hora</th>
+                      <th scope="col">Clima</th>
+                      <th scope="col">Temp.</th>
+                      <th scope="col">Prob. lluvia</th>
+                      <th scope="col">Lluvia</th>
+                      <th scope="col">Humedad</th>
+                      <th scope="col">Viento</th>
                     </tr>
                   </thead>
                   <tbody>

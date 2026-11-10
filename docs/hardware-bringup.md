@@ -71,14 +71,17 @@ pio device monitor
 `field_bringup` muestrea cada 2 s y publica cada 5 s para que la web se
 actualice casi en vivo mientras pruebas los sensores.
 
-**Calibración:** igual que en el ESP8266, por comandos serial:
-- sonda al aire → escribe `cal dry`
-- sonda en agua → escribe `cal wet`
-- `show` para ver la lectura
+**Calibración:** por comandos serial a 115200 (slots `0..5` = A1, A2, A3, B1,
+B2, B3):
 
-> La calibración por comandos serial se implementó en el firmware del ESP8266.
-> En el ESP32 el cálculo usa `SOIL_DRY_DEFAULT`/`SOIL_WET_DEFAULT`; si quieres
-> comandos de calibración también ahí, dímelo y los agrego.
+```
+CAL SHOW          # ver dry/wet actuales
+CAL DRY 0         # sonda 0 al aire -> captura el punto seco
+CAL WET 0         # sonda 0 en agua  -> captura el punto húmedo
+CAL SAVE          # guardar en NVS
+```
+
+En el secundario están cableados los slots 0–3 (GPIO32, 33, 34, 35).
 
 ---
 
@@ -137,7 +140,7 @@ SERIAL_DEVICE=/dev/ttyUSB0 docker compose \
 
 Averigua el puerto con `pio device list`.
 
-Abre **http://localhost:5173** (admin / admin123). El Dashboard muestra:
+Abre **http://localhost:5173** (usuario y contraseña definidos en .env: ADMIN_USERNAME / ADMIN_PASSWORD). El Dashboard muestra:
 - El sensor conectado (B1) con su porcentaje real
 - Los demás como "Sin datos"
 - "Campo" en verde
@@ -178,6 +181,7 @@ Y en `firmware/camera/include/config.h` deben coincidir:
 | La cámara se conecta pero el POST falla | `CAM_FIELD_HOST` no es `192.168.4.1`, o el campo reinició |
 | El campo no reenvía la foto | Canal ESP-NOW ≠ canal del gateway (debe ser 6) |
 | La web no muestra el sensor | `FIELD_SOIL_MASK` sin el bit del sensor conectado |
+| `Brownout detector was triggered` en bucle al arrancar | La rail de 3.3 V cae al encender Wi-Fi/ESP-NOW: cable fino, puerto limitado o regulador de la placa. Usa cable corto, puerto directo o fuente 5 V/2 A + capacitor 470–1000 µF |
 | Sensor siempre 0 % o 100 % | Falta calibrar (`cal dry` / `cal wet`) |
 | `latest/file` da 404 | Aún no se ha reensamblado ninguna foto completa |
 

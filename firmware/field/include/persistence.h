@@ -20,6 +20,11 @@ class Persistence {
   bool loadConfig(RuntimeConfig& out);
   bool hasConfig();
 
+  // Last accepted command sequence, persisted to reject a replay after a
+  // reboot. Commands are rare, so the NVS write cost is negligible.
+  bool saveLastSeq(uint16_t seq);
+  uint16_t loadLastSeq();
+
   bool saveCalibration(const SensorManager::Calibration* calibration, size_t count);
   bool loadCalibration(SensorManager::Calibration* out, size_t count);
 

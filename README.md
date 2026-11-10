@@ -1,5 +1,3 @@
-> **Control MQTT agregado:** ver [docs/mqtt.md](docs/mqtt.md) para configurar los botones y el ESP32.
-
 # Invernadero Automatizado - Santa Lucía Cotzumalguapa, Guatemala
 
 Sistema completo de monitoreo y automatización para invernadero 19m x 4m con Raspberry Pi 5, ESP32 y sensores IoT.
@@ -7,11 +5,11 @@ Sistema completo de monitoreo y automatización para invernadero 19m x 4m con Ra
 ## 🏗️ Arquitectura
 
 ```
-ESP32-CAM ──WiFi (AP del campo)──▶ ESP32 Campo ──ESP-NOW 50m──▶ ESP32 Gateway ──USB──▶ RPi5
-   captura JPEG                     6x suelo + BME280                  puente            │
-                                     5 actuadores + automatización                        ▼
-                                                                          FastAPI + SQLite + React
-                                                                          (dashboard tiempo real vía WebSocket)
+ESP32-CAM ──WiFi (AP del campo)──▶ ESP32 Campo primario ──ESP-NOW 50m──▶ ESP32 Gateway ──USB──▶ RPi5
+   captura JPEG                     2x suelo + BME280                     puente serial         │
+                                     5 actuadores + automatización                             ▼
+ESP32 Campo secundario ──ESP-NOW──▶        │                              FastAPI + SQLite + React
+   4x suelo extra                          └── el puente fusiona las 6 lecturas   (dashboard vía WebSocket)
 ```
 
 El nodo de campo levanta su propia red Wi-Fi (`invernadero-campo`), sin router.
@@ -41,15 +39,22 @@ llegan a la web en tiempo real.
 - SSR-40DA o MOSFET para humidificadores 24VDC
 - Fuente 24VDC 3A + fuente 5VDC 3A para ESP32
 - Tinaco/reserva de agua + válvula pie + cebado
+- Pull-down de 10 kΩ en cada GPIO de relé y puesta a tierra única
+
+Detalle de selección, cableado y verificación: `docs/potencia.md`.
 
 ## 🚀 Despliegue Rápido (Simulación)
 
 ```bash
 cd /home/luis/Proyectos/InvernaderoAuto
 
-# 1. Configurar variables
+# 1. Configurar variables y secretos
 cp .env.example .env
-# Editar .env si necesitas cambiar puertos/paths
+# Rellena en .env:
+#   JWT_SECRET_KEY       -> openssl rand -hex 32
+#   DEVICE_API_TOKEN     -> openssl rand -hex 32
+#   ADMIN_PASSWORD       -> una contraseña fuerte
+# No existe ningún usuario viewer123 ni contraseña por defecto.
 
 # 2. Levantar con Docker Compose
 docker compose up --build -d
@@ -58,10 +63,41 @@ docker compose up --build -d
 docker compose logs -f
 
 # 4. Acceder a la UI
-# http://localhost:5173
-# Usuario: admin / admin123
-# Usuario: viewer / viewer123
+# Dashboard público: http://localhost:5173/
+# Panel admin:       http://localhost:5173/admin/login
+# Usuario: ADMIN_USERNAME (por defecto admin) / ADMIN_PASSWORD
 ```
+
+La API **no arranca** si `JWT_SECRET_KEY` sigue siendo el valor de ejemplo, y
+los endpoints de telemetría/fotos/confirmación rechazan peticiones sin
+`DEVICE_API_TOKEN`. El frontend se sirve compilado por Nginx en el mismo origen
+que `/api`, sin CORS ni `localhost` embebido.
+
+## 🌍 Acceso público y panel admin
+
+Desde v2 la lectura es pública y el control exige rol `admin`:
+
+| Ruta | Acceso |
+|------|--------|
+| `/` | Dashboard público en vivo (sin login) |
+| `/fotos` | Galería pública |
+| `/clima` | Clima público |
+| `/admin/login` | Login de administrador |
+| `/admin` | Control de actuadores |
+| `/admin/cultivos` | Gestión de cultivos |
+| `/admin/configuracion` | Configuración e histeresis |
+| `/admin/logs` | Auditoría de acciones |
+| `/admin/usuarios` | Altas de usuarios y roles |
+
+La API pública (`/api/public/telemetry`, `/photos`, `/weather`, `/crops`) está
+redactada: no devuelve `device_id`, RSSI, secuencia, notas internas ni rutas de
+archivos. Las escrituras viven bajo `/api/admin/*` y todas quedan en
+`audit_logs`. La API directa escucha solo en `127.0.0.1:8000`; el frontal Nginx
+la expone en el mismo origen.
+
+Despliegue con TLS, túnel y primer admin: **[docs/deploy-public.md](docs/deploy-public.md)**.
+Guía específica para **Dokploy + Cloudflare Tunnel**:
+**[docs/deploy-dokploy-cloudflare.md](docs/deploy-dokploy-cloudflare.md)**.
 
 ## 🧪 Verificación
 
@@ -69,16 +105,22 @@ docker compose logs -f
 # Backend API
 curl http://localhost:8000/health
 
-# Base de datos sembrada
+# Login (usa las credenciales definidas en .env)
 curl -X POST http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+  -d '{"username":"admin","password":"TU_ADMIN_PASSWORD"}'
 
-# WebSocket
-# Abrir http://localhost:5173 -> Dashboard -> ver telemetría simulada cada 30s
+# Telemetría de dispositivo (requiere el token compartido)
+curl -X POST http://localhost:8000/api/config/telemetry \
+  -H "X-Device-Token: $DEVICE_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @telemetry.json
+
+# WebSocket del dashboard público
+# Abrir http://localhost:5173/ -> telemetría pública en vivo
 
 # Fotos
-# Cada 30min se genera foto dummy y aparece en /photos
+# Cada 30min se genera foto dummy y aparece en /fotos
 ```
 
 ## 🔌 Modo Serial (Gateway Real)
@@ -100,14 +142,13 @@ El bridge verifica el CRC16 de cada línea y reenvía `telemetry` a
 
 ## 📡 Prueba de Enlace ESP-NOW
 
-Para verificar dos radios antes de armar el invernadero, presiona el botón en
-una placa y el LED de la otra cambia (y viceversa). Compila para ESP32 y
-ESP8266:
+El firmware de bring-up vive en `firmware/bringup` (dos placas: nodo de campo
+y gateway ESP8266). Sigue `firmware/bringup/README.md` para verificar el enlace
+radio antes de armar el invernadero:
 
 ```bash
-cd firmware/espnow_button_led
-pio run -e esp32 -t upload
-pio run -e esp8266 -t upload
+cd firmware/bringup/esp8266_field   && pio run -e field -t upload
+cd ../esp8266_gateway               && pio run -e gateway -t upload
 ```
 
 ## 🔧 Firmware
@@ -117,9 +158,15 @@ comparte el driver ESP-NOW, el protocolo y el CRC16:
 
 | Nodo | Placa | Rol |
 |------|-------|-----|
-| `firmware/field` | ESP32 | 6 sensores de suelo + BME280, 5 actuadores, automatización y fail-safe |
-| `firmware/gateway` | ESP32 | Puente ESP-NOW ↔ USB serial hacia la Raspberry Pi |
+| `firmware/field` (primario) | ESP32 | 2 sondas + BME280, 5 actuadores, automatización, fail-safe y AP de cámara |
+| `firmware/field` (`field_secondary`) | ESP32 | 4 sondas extra; reenvía telemetría al gateway por ESP-NOW |
+| `firmware/gateway` | ESP32 | Puente ESP-NOW ↔ USB serial (telemetría, fotos y comandos) |
 | `firmware/camera` | ESP32-CAM | Captura JPEG periódica → Wi-Fi al nodo de campo |
+
+El gateway **solo habla por USB serial** con la Raspberry: telemetría, fotos y
+comandos. Los botones de la web llegan a la API, que llama al bridge serial; el
+bridge escribe `set_actuator` por USB, el gateway lo traduce a
+`CMD_SET_ACTUATOR` por ESP-NOW y devuelve el ACK del campo. No se usa ningún broker externo.
 
 ```bash
 cd firmware/field   && pio run -e field     # compilar nodo de campo
@@ -127,8 +174,13 @@ cd firmware/gateway && pio run -e gateway   # compilar gateway
 cd firmware/camera  && pio run -e camera    # compilar cámara
 ```
 
-La lógica de automatización del firmware es un port fiel de
-`backend/api/app/automation.py` y se prueba en el host con
+La lógica de automatización del firmware sigue las mismas reglas que
+`backend/api/app/automation.py` (histéresis, límite máximo de encendido,
+cooldown de apagado y detección de sensor congelado). El "port" es fiel en las
+decisiones, con dos matices: el push de configuración aplica parcialmente por
+chunks y solo se compromete con el CRC del documento completo, y el backend
+Python es la referencia de pruebas, no el runtime del simulador (el simulador
+tiene su propia copia). Se prueba en el host con
 `bash firmware/field/tools/run_logic_tests.sh`. Detalles en
 `firmware/field/README.md`, `firmware/gateway/README.md` y
 `firmware/camera/README.md`.
@@ -155,17 +207,23 @@ InvernaderoAuto/
 │       └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # Dashboard, Photos, History, Events, Config, Crops
-│   │   ├── components/      # SensorCard, Charts, Layout
-│   │   ├── context/         # AuthContext, TelemetryContext (WS)
-│   │   └── api.js           # Cliente API + WS reconexión
+│   │   ├── pages/           # Públicas, admin (control, cultivos, config, logs)
+│   │   ├── components/      # Layouts, RequireAuth, SensorCard, Charts, Modal…
+│   │   ├── context/         # AuthContext, TelemetryContext (WS), WeatherContext
+│   │   ├── hooks/           # usePublicTelemetry, useDialog, usePushNotifications…
+│   │   ├── test/            # Vitest + Testing Library
+│   │   └── api.js           # Cliente API público/admin + WS
+│   ├── public/              # manifest, service worker, iconos, offline.html
+│   ├── nginx.conf           # configuración de desarrollo
+│   ├── nginx.production.conf# HTTPS/redirect para producción
 │   └── Dockerfile
 ├── firmware/
-│   ├── common/              # Protocolo, ESP-NOW HAL, botón, LED compartidos
-│   ├── field/               # Nodo de campo ESP32
+│   ├── common/              # Protocolo, ESP-NOW HAL (PMK/LMK) y utilidades
+│   ├── field/               # Nodo de campo ESP32 (primario y secundario)
 │   ├── gateway/             # Gateway ESP-NOW ↔ serial (ESP32 y ESP8266)
 │   ├── camera/              # Nodo cámara ESP32-CAM
-│   └── espnow_button_led/   # Prueba de enlace botón/LED (ESP32 y ESP8266)
+│   ├── bringup/             # Bring-up ESP8266 campo/gateway
+│   └── tools/               # Utilidades de diagnóstico (i2c_probe)
 ├── config/
 │   └── actuators.yaml       # HAL actuadores (pins, tipo, max_on)
 ├── docs/
@@ -258,21 +316,97 @@ acumulados); por eso el detalle fino de "lluvia en la próxima hora" no está
 disponible. Los datos son de OpenWeather y el pronóstico no sustituye los
 avisos oficiales (INSIVUMEH/CONRED).
 
+## 📱 PWA y alertas de riego
+
+La interfaz se puede instalar en el teléfono y enviar una notificación cuando
+el suelo pide agua. Incluye navegación móvil, tablas en tarjetas, modo offline,
+aviso persistente en el dashboard y Web Push en segundo plano.
+
+```bash
+# 1. Generar las claves VAPID (una vez; quedan en config/, ignoradas por git)
+bash scripts/generate_vapid_keys.sh
+
+# 2. Reconstruir la API y el frontend
+docker compose up -d --build api frontend
+```
+
+Requisitos y pasos detallados: **[docs/pwa-notificaciones.md](docs/pwa-notificaciones.md)**.
+
+> Las notificaciones, la instalación y el service worker exigen **HTTPS** (o
+> `localhost`). En una IP LAN por HTTP el navegador las bloquea; la app lo
+> avisa y mantiene el banner de riego dentro de la interfaz.
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `NOTIFICATIONS_ENABLED` | `true` | Activa el vigilante de riego y los push. |
+| `VAPID_PUBLIC_KEY_PATH` | `./config/vapid_public.pem` | Clave pública VAPID. |
+| `VAPID_PRIVATE_KEY_PATH` | `./config/vapid_private.pem` | Clave privada VAPID (600). |
+| `VAPID_SUBJECT` | `mailto:admin@greenhouse.local` | Contacto VAPID. |
+| `IRRIGATION_CHECK_SEC` | `60` | Frecuencia de evaluación. |
+| `IRRIGATION_REMINDER_HOURS` | `6` | Recordatorio mientras siga seco. |
+| `IRRIGATION_MIN_VALID_SENSORS` | `1` | Sensores válidos mínimos. |
+| `IRRIGATION_MAX_AGE_MIN` | `10` | No alertar con telemetría más vieja. |
+
+La evaluación vive en `backend/api/app/irrigation.py` (histéresis compartida con
+la automatización) y el envío en `backend/api/app/notifications.py`. El umbral
+se configura en **Configuración → Humedad del Suelo**: `on_below_pct` dispara la
+alerta y `off_above_pct` la resuelve.
+
+Auditoría completa de la interfaz, hallazgos y estado de cada corrección:
+**[docs/ui-audit.md](docs/ui-audit.md)**.
+
+## 🔐 Seguridad
+
+El detalle completo está en **[docs/seguridad.md](docs/seguridad.md)**.
+
+- **Login:** bloqueo persistente por usuario (5 fallos/15 min) y por IP
+  (20 fallos/15 min), con `429` + `Retry-After`, mensaje genérico y verificación
+  dummy para no enumerar cuentas.
+- **Borde:** Nginx limita `/api/auth/login` a 10 req/min por IP; Fail2ban
+  opcional en `deploy/fail2ban/`. La API solo se publica en `127.0.0.1:8000`.
+- **Sesión:** cookie `HttpOnly` + `SameSite=lax` (+ `Secure` en producción), sin
+  JWT en `localStorage`; el WebSocket ya no acepta tokens en la URL.
+- **CSRF:** comprobación de `Origin` en escrituras autenticadas por cookie.
+- **Cabeceras:** CSP, HSTS, `nosniff`, `DENY`, COOP/CORP y Permissions-Policy.
+- **API:** `/docs` deshabilitado en producción; CORS con orígenes explícitos.
+- **Dependencias:** `pip-audit` y `npm audit` en verde y ejecutados en CI.
+
+```bash
+# Auditoría de dependencias
+docker compose exec -T api pip install -q pip-audit && docker compose exec -T api pip-audit -r requirements.txt
+cd frontend && npm audit
+
+# Fail2ban (host)
+cat deploy/fail2ban/README.md
+```
+
+> Para producción: `ENVIRONMENT=production`, HTTPS real y
+> `AUTH_COOKIE_SECURE=true` (es el valor por defecto en producción). La API se
+> niega a arrancar en producción con una cookie no segura.
+
 
 ## 🧪 Tests
 
 ```bash
 # Backend
 cd backend/api
-pip install -r requirements.txt pytest pytest-asyncio httpx
-pytest app/test_main.py -v
+pip install -r requirements.txt
+DEVICE_API_TOKEN=test-device-token JWT_SECRET_KEY=test-secret-key-not-for-production pytest tests -q
 
 # Frontend
 cd frontend
-npm install
+npm ci
 npm run lint
+npm test
 npm run build
+
+# Lógica del firmware en host (requiere `pio run -e field` una vez)
+bash firmware/field/tools/run_logic_tests.sh
+bash firmware/gateway/scripts/check_payloads.sh
 ```
+
+CI (`.github/workflows/ci.yml`) ejecuta pytest, lint, Vitest, build de frontend,
+las pruebas de lógica y compila los tres nodos en cada push.
 
 ## 📡 Protocolo ESP-NOW (Para firmware Fase 5)
 
@@ -286,12 +420,18 @@ Gateway → Pi: JSON-lines + CRC16 a 115200 baudios por USB CDC.
 
 ## 🛑 Fail-Safe Implementado
 
-- Sensor inválido → actuador OFF + evento
+- Sensor inválido **o congelado** (varianza ~0 durante 8 muestras) → actuador OFF
 - Histéresis obligatoria (no on/off simple)
-- `max_on_seconds` por actuador (bomba 900s, vent/hum 7200s)
-- Arranque → OFF hasta config NVS válida
+- `max_on_seconds` por actuador (bomba 900s, vent/hum 7200s); `0` significa
+  "usar el default", nunca "ilimitado"
+- `min_off_seconds` tras un corte por máximo (bomba 300s) y rearme solo con
+  histéresis recuperada: se acabó el ciclo 15 min ON / 10 s OFF
+- Arranque → pines de relé en OFF **antes** de `Serial.begin()`
+- Watchdog de aplicación: si el `loop()` no avanza, una tarea fuerza `allOff()`
+- Arranque → OFF hasta config NVS válida; se rechaza una versión de config
+  inferior a la persistida
 - Riego deshabilitado por defecto (`irrigation.enabled=false`)
-- Watchdog comunicación 5min → alerta
+- Watchdog comunicación 5min → evento persistido en `events` y alerta en la UI
 
 ## 📝 Próximos Pasos (Fase 5 - Firmware)
 

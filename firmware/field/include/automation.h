@@ -40,7 +40,8 @@ bool validTemperature(float value);
 bool validHumidity(float value);
 bool validSoil(float value);
 
-// State of the five actuators plus how long each has been continuously ON.
+// State of the five actuators plus how long each has been continuously ON and
+// OFF, and whether a max-ON trip is waiting for hysteresis recovery.
 struct ActuatorState {
   bool fan_1 = false;
   bool fan_2 = false;
@@ -49,6 +50,9 @@ struct ActuatorState {
   bool pump = false;
 
   uint32_t on_since_ms[ACT_COUNT] = {0, 0, 0, 0, 0};
+  uint32_t off_since_ms[ACT_COUNT] = {0, 0, 0, 0, 0};
+  bool limit_blocked[ACT_COUNT] = {false, false, false, false, false};
+  bool limit_recovered[ACT_COUNT] = {false, false, false, false, false};
 
   bool get(uint8_t index) const;
   void set(uint8_t index, bool value);

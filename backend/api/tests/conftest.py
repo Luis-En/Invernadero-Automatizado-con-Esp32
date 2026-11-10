@@ -14,6 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 _tmpdir = tempfile.mkdtemp(prefix="greenhouse-test-")
 TEST_DB_PATH = os.path.join(_tmpdir, "test.db")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
+os.environ["DEVICE_API_TOKEN"] = "test-device-token"
+os.environ["PHOTO_STORAGE_PATH"] = os.path.join(_tmpdir, "photos")
+os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
+os.environ["ADMIN_PASSWORD"] = ""
+os.environ["NOTIFICATIONS_ENABLED"] = "false"
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["AUDIT_LOG_ENABLED"] = "true"
+os.environ["VAPID_PUBLIC_KEY_PATH"] = "/tmp/greenhouse-test-no-public.pem"
+os.environ["VAPID_PRIVATE_KEY_PATH"] = "/tmp/greenhouse-test-no-private.pem"
 
 from app.auth import get_password_hash  # noqa: E402
 from app.database import get_db  # noqa: E402
@@ -110,3 +119,8 @@ def auth_admin(admin_token):
 @pytest.fixture
 def auth_viewer(viewer_token):
     return {"Authorization": f"Bearer {viewer_token}"}
+
+
+@pytest.fixture
+def device_headers():
+    return {"X-Device-Token": "test-device-token"}

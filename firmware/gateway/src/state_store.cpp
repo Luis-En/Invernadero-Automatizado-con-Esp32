@@ -22,11 +22,14 @@ const size_t kStoreSize = sizeof(PersistedState);
 void loadPersisted(PersistedState& out) {
   EEPROM.begin(kStoreSize);
   EEPROM.get(0, out);
+  EEPROM.end();
 }
 
 void savePersisted(const PersistedState& value) {
+  EEPROM.begin(kStoreSize);
   EEPROM.put(0, value);
   EEPROM.commit();
+  EEPROM.end();
 }
 #else
 const char* kNvsNamespace = "greenhouse";
@@ -83,19 +86,31 @@ void StateStore::syncEpoch(uint32_t epoch) {
   if (epoch == 0) {
     return;
   }
+  const uint32_t previous = epochBase_;
   epochBase_ = epoch;
   epochBaseMillis_ = millis();
   timeSynced_ = true;
+
+  // A timesync arrives every 30 s. Writing the same epoch to flash each time
+  // burns the wear-limited cells, so persist only when the clock moved more
+  // than a minute (or there is no valid stored record yet).
+  bool changed = previous == 0 || epoch > previous + 60 ||
+                       (previous > epoch && previous - epoch > 60);
 #if defined(ESP8266)
   PersistedState stored;
   loadPersisted(stored);
   if (stored.magic != kStoreMagic) {
     stored = {kStoreMagic, 0, 0};
+    changed = true;
   }
-  stored.epoch = epoch;
-  savePersisted(stored);
+  if (changed) {
+    stored.epoch = epoch;
+    savePersisted(stored);
+  }
 #else
-  prefs.putULong(kKeyLastEpoch, epoch);
+  if (changed) {
+    prefs.putULong(kKeyLastEpoch, epoch);
+  }
 #endif
 }
 

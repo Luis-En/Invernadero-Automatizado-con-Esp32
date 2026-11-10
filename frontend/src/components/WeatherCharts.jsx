@@ -38,14 +38,24 @@ export function RainTempChart({ hourly }) {
 
   if (!data.length) {
     return (
-      <div className="chart-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+      <div className="chart-container" role="img" aria-label="Sin datos de pronóstico" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
         Sin datos de pronóstico
       </div>
     )
   }
 
+  const totalRain = data.reduce((sum, point) => sum + (Number(point.rain) || 0), 0)
+  const temperatures = data.map(point => point.temperature).filter(value => value !== null && value !== undefined && !Number.isNaN(value))
+  const tempSummary = temperatures.length
+    ? `, temperatura entre ${Math.min(...temperatures).toFixed(1)} y ${Math.max(...temperatures).toFixed(1)} grados`
+    : ''
+
   return (
-    <div className="chart-container">
+    <div
+      className="chart-container"
+      role="img"
+      aria-label={`Pronóstico de lluvia y temperatura: ${totalRain.toFixed(1)} milímetros acumulados${tempSummary}`}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />

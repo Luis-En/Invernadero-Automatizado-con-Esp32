@@ -46,6 +46,14 @@ The telemetry and photo chunk serialization is shared (`src/json_builder.cpp`,
 same JSON. The host test `scripts/check_payloads.sh` compiles that code for
 the desktop and validates the output against the backend schema.
 
+## Actuator commands (serial only)
+
+The Pi's serial bridge writes `{"type":"set_actuator", "command_id":...,
+"actuator":"fan_1", "state":true}` over USB. The gateway translates it into an
+ESP-NOW `CMD_SET_ACTUATOR` toward the field node and replies with
+`{"type":"actuator_ack", ...}` carrying the same `command_id` and the field's
+status (`applied`, `rejected`, `busy` or `timeout`). No broker is involved.
+
 ## Serial contract
 
 Both directions use one line per message:

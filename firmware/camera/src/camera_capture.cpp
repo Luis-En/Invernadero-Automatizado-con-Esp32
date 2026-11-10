@@ -63,6 +63,9 @@ bool CameraCapture::begin() {
   if (err != ESP_OK) {
     last_error_ = esp_err_to_name(err);
     ready_ = false;
+    // Tear down the partially initialized driver; otherwise the next retry
+    // sees a zombie camera and every esp_camera_init fails.
+    esp_camera_deinit();
     return false;
   }
 

@@ -13,10 +13,12 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+from aiohttp import web
 
 from serial_source import SerialSource
 from simulator import Simulator
@@ -44,32 +46,20 @@ class SerialBridge:
         self.baudrate = int(os.getenv("SERIAL_BAUDRATE", "115200"))
         self.simulator = Simulator()
         self.source: Optional[SerialSource] = None
-        self.device_username = os.getenv("DEVICE_USERNAME", "viewer")
-        self.device_password = os.getenv("DEVICE_PASSWORD", "viewer123")
-        self._token: Optional[str] = None
+        # Shared device token. Empty means the API rejects device writes, which
+        # is the intended fail-closed default.
+        self.device_token = os.getenv("DEVICE_API_TOKEN", "").strip()
         # Latest frame from each field node. The two nodes are merged into a
         # single 6-slot reading so the backend/frontend keep their current model
         # (slots 0-1 = primary probes 34/35, slots 2-5 = secondary probes 32-35).
         self.primary: Optional[dict] = None
         self.secondary: Optional[dict] = None
+        # command_id -> Future resolved by the gateway's serial actuator_ack.
+        self.pending_commands: dict[str, asyncio.Future] = {}
+        self.http_port = int(os.getenv("BRIDGE_HTTP_PORT", "8081"))
 
-    async def _ensure_token(self) -> None:
-        if self._token:
-            return
-        try:
-            resp = await self.client.post(
-                f"{self.api_url}/api/auth/login",
-                json={"username": self.device_username, "password": self.device_password},
-            )
-            if resp.status_code == 200:
-                self._token = resp.json().get("access_token")
-            else:
-                logger.warning("device login failed: %s", resp.status_code)
-        except Exception as exc:
-            logger.debug("device login error: %s", exc)
-
-    def _auth_headers(self) -> dict:
-        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
+    def _device_headers(self) -> dict:
+        return {"X-Device-Token": self.device_token} if self.device_token else {}
 
     async def start(self) -> None:
         self.running = True
@@ -129,12 +119,11 @@ class SerialBridge:
                 await asyncio.sleep(30)
 
     async def _fetch_and_apply_config(self) -> None:
-        await self._ensure_token()
         response = await self.client.get(
-            f"{self.api_url}/api/config/active", headers=self._auth_headers()
+            f"{self.api_url}/api/config/device/active", headers=self._device_headers()
         )
-        if response.status_code == 401:
-            self._token = None
+        if response.status_code in (401, 503):
+            logger.warning("device config read rejected: %s", response.status_code)
             return
         if response.status_code == 200:
             config = response.json()
@@ -144,7 +133,7 @@ class SerialBridge:
                 try:
                     await self.client.post(
                         f"{self.api_url}/api/config/confirm/{version}",
-                        headers=self._auth_headers(),
+                        headers=self._device_headers(),
                     )
                 except Exception as exc:
                     logger.debug("config confirm failed: %s", exc)
@@ -178,9 +167,67 @@ class SerialBridge:
         await self.source.start()
         asyncio.create_task(self._handshake_loop())
         asyncio.create_task(self._timesync_loop())
+        asyncio.create_task(self._start_http_server())
 
         async for message in self.source.messages():
             await self._dispatch(message)
+
+    async def _start_http_server(self) -> None:
+        app = web.Application()
+        app.router.add_post("/command", self._handle_command_http)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", self.http_port)
+        await site.start()
+        logger.info("bridge command server listening on :%d", self.http_port)
+
+    async def _handle_command_http(self, request: web.Request) -> web.Response:
+        """Accept an actuator command from the API and relay it over serial.
+
+        The gateway answers with an `actuator_ack` line carrying the same
+        command_id, which resolves the future below. The API receives the real
+        device confirmation, not just an HTTP 200.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"detail": "invalid JSON"}, status=400)
+
+        actuator = body.get("actuator")
+        state = body.get("state")
+        if not isinstance(actuator, str) or not isinstance(state, bool):
+            return web.json_response({"detail": "actuator and state are required"}, status=400)
+
+        if self.simulate or self.source is None:
+            return web.json_response(
+                {"actuator": actuator, "state": state, "status": "applied"}
+            )
+
+        command_id = str(uuid.uuid4())
+        future = asyncio.get_running_loop().create_future()
+        self.pending_commands[command_id] = future
+
+        sent = self.source.write_json(
+            {
+                "type": "set_actuator",
+                "command_id": command_id,
+                "actuator": actuator,
+                "state": state,
+            }
+        )
+        if not sent:
+            self.pending_commands.pop(command_id, None)
+            return web.json_response({"detail": "serial link unavailable"}, status=503)
+
+        try:
+            result = await asyncio.wait_for(future, timeout=8.0)
+        except asyncio.TimeoutError:
+            return web.json_response({"detail": "device did not confirm"}, status=504)
+        finally:
+            self.pending_commands.pop(command_id, None)
+
+        http_status = 200 if result.get("status") == "applied" else 409
+        return web.json_response(result, status=http_status)
 
     async def _timesync_loop(self) -> None:
         # Keep resending the clock. The gateway forwards each timesync to both
@@ -213,6 +260,7 @@ class SerialBridge:
                 self.source.write_json({"type": "timesync", "epoch": int(time.time())})
         elif kind == "event":
             logger.warning("gateway event %s: %s", message.get("code"), message.get("message"))
+            await self._post_event(message)
         elif kind == "device_status":
             logger.info(
                 "gateway status: field=%s camera=%s field_rssi=%s",
@@ -222,6 +270,17 @@ class SerialBridge:
             )
         elif kind == "config_ack":
             logger.info("gateway config ack v%s: %s", message.get("version"), message.get("status"))
+        elif kind == "actuator_ack":
+            command_id = message.get("command_id")
+            future = self.pending_commands.get(command_id)
+            if future is not None and not future.done():
+                future.set_result(message)
+            logger.info(
+                "actuator %s -> %s (%s)",
+                message.get("actuator"),
+                message.get("state"),
+                message.get("status"),
+            )
         else:
             logger.debug("ignoring gateway message type=%s", kind)
 
@@ -284,16 +343,46 @@ class SerialBridge:
 
     async def _post_telemetry(self, message: dict) -> None:
         payload = {key: value for key, value in message.items() if key != "type"}
-        # The field node only knows wall time once it has been time-synced. When
-        # it has no clock it omits the timestamp, so stamp the arrival time here.
-        if not payload.get("timestamp"):
+        # The field node only knows wall time once it has been time-synced.
+        # Before that the gateway emits a 1970 sentinel (or no timestamp), so
+        # stamp the arrival time here instead of letting the API reject an
+        # absurd clock.
+        timestamp = payload.get("timestamp")
+        if not timestamp or str(timestamp).startswith("1970-01-01"):
             payload["timestamp"] = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
         try:
-            await self.client.post(f"{self.api_url}{TELEMETRY_URL}", json=payload)
+            resp = await self.client.post(
+                f"{self.api_url}{TELEMETRY_URL}",
+                json=payload,
+                headers=self._device_headers(),
+            )
+            if resp.status_code >= 400:
+                logger.warning("telemetry rejected: %s %s", resp.status_code, resp.text[:160])
         except Exception as exc:
             logger.warning("failed to post telemetry: %s", exc)
+
+    async def _post_event(self, message: dict) -> None:
+        severity = message.get("severity", "info")
+        if severity not in ("info", "warning", "critical"):
+            severity = "info"
+        payload = {
+            "severity": severity,
+            "code": str(message.get("code", "DEVICE_EVENT"))[:50],
+            "message": str(message.get("message", ""))[:2000],
+            "details": {"source": "gateway"},
+        }
+        try:
+            resp = await self.client.post(
+                f"{self.api_url}/api/events/device",
+                json=payload,
+                headers=self._device_headers(),
+            )
+            if resp.status_code >= 400:
+                logger.warning("event rejected: %s %s", resp.status_code, resp.text[:160])
+        except Exception as exc:
+            logger.warning("failed to persist event: %s", exc)
 
     async def _post_photo_chunk(self, chunk: dict) -> None:
         try:
@@ -312,7 +401,10 @@ class SerialBridge:
         }
         try:
             resp = await self.client.post(
-                f"{self.api_url}{PHOTO_CHUNK_URL}", params=params, files=files
+                f"{self.api_url}{PHOTO_CHUNK_URL}",
+                params=params,
+                files=files,
+                headers=self._device_headers(),
             )
             if resp.status_code >= 400:
                 logger.warning("photo chunk rejected: %s %s", resp.status_code, resp.text[:160])

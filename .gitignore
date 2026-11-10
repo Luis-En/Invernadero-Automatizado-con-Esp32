@@ -24,6 +24,7 @@ docker-compose.override.yml
 
 # Data
 data/photos/
+data/logs/
 data/*.db
 data/*.db-wal
 data/*.db-shm
@@ -55,4 +56,13 @@ Thumbs.db
 *.key
 *.pem
 secrets/
-firmware/field/include/mqtt_config.h
+config/passwd
+config/acl
+firmware/*/include/mqtt_config.h
+firmware/*/include/espnow_secrets.h
+
+# Backups
+backups/
+
+# Test runs from backend/api create ./data
+backend/api/data/

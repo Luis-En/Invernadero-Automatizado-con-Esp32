@@ -10,9 +10,11 @@
 #include "persistence.h"
 #include "protocol.h"
 #include "sensors.h"
-#include "mqtt_link.h"
-#include "usb_telemetry.h"
 #include "wifi_photo.h"
+
+#if defined(ESP32) && !FIELD_CALIBRATION_ONLY
+#include <esp_task_wdt.h>
+#endif
 
 namespace {
 
@@ -25,9 +27,17 @@ uint32_t last_sample_ms = 0;
 uint32_t last_telemetry_ms = 0;
 uint32_t last_hello_ms = 0;
 
-bool mqtt_active[ACT_COUNT] = {};
-bool mqtt_values[ACT_COUNT] = {};
-uint32_t mqtt_on_since[ACT_COUNT] = {};
+// Direct actuator commands arrive from the gateway (serial bridge -> gateway ->
+// ESP-NOW). They are tracked separately from the automatic control state so a
+// single manual action does not disturb the other outputs.
+bool remote_active[ACT_COUNT] = {};
+bool remote_values[ACT_COUNT] = {};
+uint32_t remote_on_since[ACT_COUNT] = {};
+uint32_t remote_off_since[ACT_COUNT] = {};
+
+#if defined(ESP32) && !FIELD_CALIBRATION_ONLY
+volatile uint32_t g_loop_heartbeat = 0;
+#endif
 
 bool manual_override_active = false;
 bool manual_values[ACT_COUNT] = {false, false, false, false, false};
@@ -43,8 +53,15 @@ void applyNewConfig(const RuntimeConfig& config) {
   manual_override_active = false;
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
     manual_values[i] = false;
-    mqtt_active[i] = false;
+    remote_active[i] = false;
+    remote_values[i] = false;
+    remote_on_since[i] = 0;
+    remote_off_since[i] = 0;
   }
+}
+
+void persistCommandSeq(uint16_t seq) {
+  persistence.saveLastSeq(seq);
 }
 
 void applyManualOverride(const bool values[ACT_COUNT]) {
@@ -58,17 +75,27 @@ void runControlCycle(uint32_t now_ms) {
 #if FIELD_HAS_ACTUATORS
   computeActuatorStates(runtime_config, latest_snapshot, actuator_state, now_ms,
                         manual_override_active, manual_values);
-  // MQTT overrides only the selected output, with local irrigation interlock
-  // and continuous-ON limits. A config change clears these manual overrides.
+  // Remote overrides only the selected output, with local irrigation
+  // interlock, continuous-ON limits and the same OFF cooldown as automation.
   for (uint8_t i = 0; i < ACT_COUNT; ++i) {
-    if (!mqtt_active[i]) continue;
+    if (!remote_active[i]) continue;
     const uint32_t limit = i == ACT_PUMP ? runtime_config.max_on_pump_s
         : (i <= ACT_FAN_2 ? runtime_config.max_on_fan_s : runtime_config.max_on_humidifier_s);
-    if ((i == ACT_PUMP && !runtime_config.irrigation_enabled) ||
-        (mqtt_values[i] && limit && now_ms - mqtt_on_since[i] >= limit * 1000UL)) {
-      mqtt_values[i] = false;
+    const uint32_t min_off = i == ACT_PUMP ? runtime_config.min_off_pump_s
+        : (i <= ACT_FAN_2 ? runtime_config.min_off_fan_s : runtime_config.min_off_humidifier_s);
+    if (i == ACT_PUMP && !runtime_config.irrigation_enabled) {
+      remote_values[i] = false;
     }
-    actuator_state.set(i, mqtt_values[i]);
+    if (remote_values[i] && limit && now_ms - remote_on_since[i] >= limit * 1000UL) {
+      remote_values[i] = false;
+      remote_off_since[i] = now_ms;
+    }
+    // A new manual ON is only accepted after the cooldown elapsed.
+    if (remote_values[i] && min_off && remote_off_since[i] != 0 &&
+        now_ms - remote_off_since[i] < min_off * 1000UL) {
+      remote_values[i] = false;
+    }
+    actuator_state.set(i, remote_values[i]);
   }
   actuators.apply(actuator_state);
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
@@ -79,14 +106,34 @@ void runControlCycle(uint32_t now_ms) {
 #endif
 }
 
-bool applyMqttCommand(uint8_t index, bool state) {
-  if (index >= ACT_COUNT || (index == ACT_PUMP && state && !runtime_config.irrigation_enabled)) return false;
-  if (state && (!mqtt_active[index] || !mqtt_values[index])) mqtt_on_since[index] = millis();
-  mqtt_active[index] = true;
-  mqtt_values[index] = state;
-  runControlCycle(millis());
+bool applyRemoteCommand(uint8_t index, bool state) {
+  if (index >= ACT_COUNT) {
+    return false;
+  }
+  if (index == ACT_PUMP && state && !runtime_config.irrigation_enabled) {
+    return false;
+  }
+  const uint32_t now = millis();
+  const uint32_t min_off = index == ACT_PUMP ? runtime_config.min_off_pump_s
+      : (index <= ACT_FAN_2 ? runtime_config.min_off_fan_s : runtime_config.min_off_humidifier_s);
+
+  if (state) {
+    if (!remote_values[index]) {
+      if (min_off && remote_off_since[index] != 0 &&
+          now - remote_off_since[index] < min_off * 1000UL) {
+        return false;  // still in cooldown after a max-ON cut
+      }
+      remote_on_since[index] = now;
+    }
+  } else if (remote_values[index]) {
+    remote_off_since[index] = now;
+  }
+
+  remote_active[index] = true;
+  remote_values[index] = state;
+  runControlCycle(now);
   // Request fresh telemetry on the next loop, in addition to the direct ACK.
-  last_telemetry_ms = millis() - FIELD_TELEMETRY_INTERVAL_MS;
+  last_telemetry_ms = now - FIELD_TELEMETRY_INTERVAL_MS;
   return actuators.outputState(index) == state;
 }
 
@@ -216,18 +263,44 @@ void pollCalibrationCommands() {
   }
 }
 
+#if defined(ESP32) && !FIELD_CALIBRATION_ONLY
+// Application watchdog: if loop() stops advancing, force every output OFF
+// from a separate task instead of waiting for the chip to reset. This covers
+// a blocked I2C bus, an infinite loop or a stuck network stack.
+void fieldWatchdogTask(void*) {
+  uint32_t last = 0;
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    const uint32_t current = g_loop_heartbeat;
+    if (current == last) {
+#if FIELD_HAS_ACTUATORS
+      actuators.allOff();
+#endif
+      for (uint8_t i = 0; i < ACT_COUNT; i++) {
+        remote_active[i] = false;
+        remote_values[i] = false;
+      }
+      Serial.println("[watchdog] loop stalled: all outputs forced OFF");
+    }
+    last = current;
+  }
+}
+#endif
+
 }  // namespace
 
 void setup() {
-  Serial.begin(115200);
-  delay(200);
-  boot_ms = millis();
-
-  // Safety first: every output OFF before anything else can fail.
+  // Pins first. The relay inputs are driven to their safe OFF level before
+  // Serial, Wi-Fi or a failed sensor read can leave them floating.
 #if FIELD_HAS_ACTUATORS
   actuators.begin();
   actuators.allOff();
 #endif
+
+  Serial.begin(115200);
+  delay(200);
+  boot_ms = millis();
+  Serial.printf("[field] boot role=%s fw=%s\n", FIELD_DEVICE_ID, FIELD_FW_VERSION);
 
   persistence.begin();
   sensors.begin();
@@ -243,6 +316,10 @@ void setup() {
 #if !FIELD_CALIBRATION_ONLY
   fieldLink.begin(applyNewConfig);
   fieldLink.setManualOverrideCallback(applyManualOverride);
+  fieldLink.setActuatorCommandCallback(applyRemoteCommand);
+  fieldLink.setMinConfigVersion(runtime_config.version);
+  fieldLink.setLastCommandSeq(persistence.loadLastSeq());
+  fieldLink.setSeqPersistCallback(persistCommandSeq);
 
 #if FIELD_HAS_CAMERA_AP
   // The camera joins the AP this node raises, so the AP must be up first; it
@@ -260,10 +337,38 @@ void setup() {
   if (!espNow.begin(FIELD_ESPNOW_CHANNEL, kEspNowMode)) {
     Serial.println("[field] ESP-NOW init failed");
   }
+
+#if defined(ESPNOW_PMK) && defined(ESPNOW_LMK)
+  {
+    const uint8_t pmk[16] = ESPNOW_PMK;
+    const uint8_t lmk[16] = ESPNOW_LMK;
+    if (!espNow.setSecurity(pmk, lmk)) {
+      Serial.println("[field] ESP-NOW encryption could not be enabled");
+    }
+  }
 #endif
 
-#if !FIELD_CALIBRATION_ONLY
-  mqttBegin(applyMqttCommand);
+  // Pin the gateway MAC when the deployment provides one. Otherwise the first
+  // command from the gateway is still learned.
+  {
+    const uint8_t fixed_gateway[6] = FIELD_GATEWAY_MAC;
+    const uint8_t zero[6] = {0, 0, 0, 0, 0, 0};
+    if (memcmp(fixed_gateway, zero, 6) != 0) {
+      fieldLink.setGatewayMac(fixed_gateway);
+      espNow.preparePeer(fixed_gateway);
+      Serial.printf("[field] fixed gateway MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    fixed_gateway[0], fixed_gateway[1], fixed_gateway[2],
+                    fixed_gateway[3], fixed_gateway[4], fixed_gateway[5]);
+    }
+  }
+
+#if defined(ESP32)
+  // Chip-level watchdog as a second line of defence; the application task
+  // above acts first and calls allOff() without rebooting.
+  esp_task_wdt_init(20, true);
+  esp_task_wdt_add(nullptr);
+  xTaskCreatePinnedToCore(fieldWatchdogTask, "field_wd", 2048, nullptr, 2, nullptr, 1);
+#endif
 #endif
 
   // Prime the snapshot so the first control cycle has data.
@@ -280,13 +385,17 @@ void setup() {
 void loop() {
   const uint32_t now_ms = millis();
 
+#if defined(ESP32) && !FIELD_CALIBRATION_ONLY
+  g_loop_heartbeat = now_ms;
+  esp_task_wdt_reset();
+#endif
+
   // 0. Serial calibration commands (CAL ...).
   pollCalibrationCommands();
 
 #if !FIELD_CALIBRATION_ONLY
   // 1. Inbound commands / config pushes.
   fieldLink.poll(now_ms);
-  mqttPoll(now_ms);
 
 #if FIELD_HAS_CAMERA_AP
   // 2. Serve the camera's Wi-Fi photo uploads and forward them to the gateway.
@@ -309,9 +418,6 @@ void loop() {
     last_telemetry_ms = now_ms;
     TelemetryData telemetry = buildTelemetry(now_ms);
     fieldLink.sendTelemetry(telemetry);
-    // Also publish on USB so the Pi bridge can read the field node directly,
-    // with or without a gateway in between.
-    usb_telemetry::emit(telemetry);
   }
 
   // 5. Announce presence so the gateway can discover/route to us.

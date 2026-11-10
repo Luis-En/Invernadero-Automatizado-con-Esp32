@@ -42,9 +42,25 @@ class SensorManager {
  private:
   float readSoilPercent(uint8_t index, uint16_t adc) const;
 
+  // Rolling window used to detect a frozen probe. A connected probe that
+  // stops changing is more dangerous than a disconnected one because it still
+  // reports a plausible value.
+  static const uint8_t kStuckSamples = 8;
+  struct StuckWindow {
+    float samples[kStuckSamples] = {0};
+    uint8_t index = 0;
+    uint8_t count = 0;
+  };
+  bool updateStuck(StuckWindow& window, float value, float epsilon);
+  void resetStuck(StuckWindow& window);
+
   uint8_t soil_pins_[SOIL_SENSOR_COUNT] = {
       SOIL_PIN_A1, SOIL_PIN_A2, SOIL_PIN_A3, SOIL_PIN_B1, SOIL_PIN_B2, SOIL_PIN_B3};
   Calibration calibration_[SOIL_SENSOR_COUNT];
+  StuckWindow soil_stuck_[SOIL_SENSOR_COUNT];
+  StuckWindow temp_stuck_;
+  StuckWindow humidity_stuck_;
+  StuckWindow pressure_stuck_;
   bool bme_present_ = false;
 };
 

@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from typing import List, Optional
 from app.database import get_db
 from app.models import Event, User
 from app.schemas import EventCreate, EventResponse, EventSeverity
-from app.dependencies import get_current_active_user, get_admin_user
+from app.dependencies import get_current_active_user, get_admin_user, require_device_token
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/events", tags=["events"])
 @router.get("", response_model=List[EventResponse])
 async def list_events(
     severity: Optional[EventSeverity] = None,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_active_user)
 ):
@@ -53,4 +53,38 @@ async def create_event(event_data: EventCreate, db: AsyncSession = Depends(get_d
     db.add(event)
     await db.commit()
     await db.refresh(event)
+    return event
+
+
+@router.post("/device", response_model=EventResponse, status_code=201)
+async def create_device_event(
+    event_data: EventCreate,
+    db: AsyncSession = Depends(get_db),
+    device=Depends(require_device_token),
+):
+    """Persist an event emitted by the gateway (FIELD_OFFLINE, CAMERA_OFFLINE…).
+
+    Without this route the bridge could only log them, which meant a field
+    outage never reached the Events page or the alert counter.
+    """
+    event = Event(**event_data.model_dump())
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+
+    # Push it to open dashboards immediately.
+    try:
+        from app.routes.config import manager
+        await manager.broadcast({
+            "type": "event",
+            "data": {
+                "id": event.id,
+                "severity": event.severity,
+                "code": event.code,
+                "message": event.message,
+                "timestamp": event.timestamp.isoformat(),
+            },
+        })
+    except Exception:
+        pass
     return event

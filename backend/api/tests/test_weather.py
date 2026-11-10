@@ -3,6 +3,7 @@
 No test touches the network: the service is given a fake ``fetch_json`` and the
 endpoint is exercised through a dependency override.
 """
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -151,7 +152,10 @@ async def test_stale_fallback_serves_last_good_payload():
     first = await service.get_overview(hours=24)
     assert first["stale"] is False
 
-    service._monotonic_at = 0.0  # expire the cache without waiting
+    # Expire the cache without waiting. Setting the timestamp to 0.0 would
+    # depend on the host uptime being longer than the TTL, which is not true
+    # right after a container boot.
+    service._monotonic_at = time.monotonic() - (service.settings.WEATHER_CACHE_TTL_SEC + 1)
     second = await service.get_overview(hours=24)
 
     assert second["stale"] is True

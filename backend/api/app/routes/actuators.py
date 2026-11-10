@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, StrictBool
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +9,10 @@ from starlette.concurrency import run_in_threadpool
 
 from app.database import get_db
 from app.dependencies import get_admin_user
-from app.models import ActiveConfig
-from app.mqtt_commands import send_command, CommandTimeout, CommandUnavailable, CommandRejected
+from app.config import settings
+from app.models import ActiveConfig, ActuatorLog
+from app.serial_commands import send_command, CommandTimeout, CommandUnavailable, CommandRejected
+from app.rate_limit import limiter
 
 router = APIRouter(prefix="/api/actuators", tags=["actuators"])
 ActuatorName = Literal["fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"]
@@ -21,22 +23,40 @@ class ActuatorCommand(BaseModel):
 
 
 @router.post("/{actuator}/command")
+@limiter.limit(settings.RATE_LIMIT_ACTUATOR)
 async def command_actuator(actuator: ActuatorName, command: ActuatorCommand,
+                           request: Request,
                            db: AsyncSession = Depends(get_db),
                            admin=Depends(get_admin_user)):
+    return await perform_actuator_command(actuator, command.state, db, admin)
+
+
+async def perform_actuator_command(actuator: str, state: bool, db: AsyncSession, admin):
+    """Shared by the legacy route and /api/admin/actuators/control."""
     # OFF must always remain available, even with irrigation disabled.
-    if actuator == "pump" and command.state:
+    if actuator == "pump" and state:
         result = await db.execute(select(ActiveConfig).where(
             ActiveConfig.is_active == True).order_by(desc(ActiveConfig.version)).limit(1))
         config = result.scalar_one_or_none()
         if not config or not config.config_json.get("irrigation", {}).get("enabled", False):
             raise HTTPException(409, "Habilite el riego antes de encender la bomba")
     try:
-        ack = await run_in_threadpool(send_command, actuator, command.state)
+        ack = await run_in_threadpool(send_command, actuator, state)
     except CommandRejected as exc:
         raise HTTPException(409, str(exc)) from exc
     except CommandUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     except CommandTimeout as exc:
         raise HTTPException(504, str(exc)) from exc
+
+    # Every accepted manual command is auditable. Automatic decisions are
+    # logged by the control loop; this covers the operator path.
+    db.add(ActuatorLog(
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        actuator=actuator,
+        state=state,
+        triggered_by="manual",
+        reason=f"Comando manual confirmado por el dispositivo ({admin.username})",
+    ))
+    await db.commit()
     return {**ack, "confirmed_at": datetime.now(timezone.utc).isoformat()}

@@ -5,21 +5,61 @@ services:
       dockerfile: Dockerfile
     container_name: greenhouse-api
     restart: unless-stopped
+    # The API is only reached through Nginx (same-origin /api). Keeping the
+    # port on loopback prevents LAN clients from bypassing the edge limits.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    cap_drop:
+      - ALL
+    cap_add:
+      # Bind-mounted data is owned by the host user; root needs DAC_OVERRIDE
+      # to write the SQLite DB/photos and FOWNER to keep the DB at mode 600.
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
       - ./backend/api:/app/app
       - ./config:/app/config
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=sqlite+aiosqlite:///./data/greenhouse.db
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env}
       - JWT_ALGORITHM=HS256
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440
-      - CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      - AUTH_COOKIE_NAME=${AUTH_COOKIE_NAME:-greenhouse_session}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-}
+      - AUTH_COOKIE_SAMESITE=${AUTH_COOKIE_SAMESITE:-lax}
+      - LOGIN_MAX_FAILURES=${LOGIN_MAX_FAILURES:-5}
+      - LOGIN_WINDOW_SEC=${LOGIN_WINDOW_SEC:-900}
+      - LOGIN_LOCKOUT_SEC=${LOGIN_LOCKOUT_SEC:-900}
+      - LOGIN_IP_MAX_FAILURES=${LOGIN_IP_MAX_FAILURES:-20}
+      - LOGIN_IP_WINDOW_SEC=${LOGIN_IP_WINDOW_SEC:-900}
+      - LOGIN_IP_LOCKOUT_SEC=${LOGIN_IP_LOCKOUT_SEC:-3600}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_STORAGE_URI=${RATE_LIMIT_STORAGE_URI:-memory://}
+      - RATE_LIMIT_LOGIN=${RATE_LIMIT_LOGIN:-5/minute}
+      - RATE_LIMIT_ACTUATOR=${RATE_LIMIT_ACTUATOR:-10/minute}
+      - RATE_LIMIT_WRITE=${RATE_LIMIT_WRITE:-30/minute}
+      - RATE_LIMIT_PHOTOS=${RATE_LIMIT_PHOTOS:-600/minute}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - REQUIRE_HTTPS=${REQUIRE_HTTPS:-}
+      - AUDIT_LOG_ENABLED=${AUDIT_LOG_ENABLED:-true}
+      - ENABLE_DOCS=${ENABLE_DOCS:-}
+      - DEVICE_API_TOKEN=${DEVICE_API_TOKEN:?DEVICE_API_TOKEN must be set in .env}
+      - SERIAL_BRIDGE_URL=${SERIAL_BRIDGE_URL:-http://serial-bridge:8081}
+      - SERIAL_BRIDGE_TIMEOUT_SECONDS=${SERIAL_BRIDGE_TIMEOUT_SECONDS:-10}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@greenhouse.local}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
       - PHOTO_STORAGE_PATH=/app/data/photos
-      - PHOTO_MAX_SIZE_MB=5
-      - PHOTO_RETENTION_DAYS=30
+      - PHOTO_MAX_SIZE_MB=${PHOTO_MAX_SIZE_MB:-5}
+      - PHOTO_MAX_TOTAL_CHUNKS=${PHOTO_MAX_TOTAL_CHUNKS:-512}
+      - PHOTO_MAX_CHUNKS_PER_MINUTE=${PHOTO_MAX_CHUNKS_PER_MINUTE:-600}
+      - PHOTO_RETENTION_DAYS=${PHOTO_RETENTION_DAYS:-30}
       - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY:-}
       - WEATHER_ENABLED=${WEATHER_ENABLED:-true}
       - WEATHER_LAT=${WEATHER_LAT:-14.3333}
@@ -30,6 +70,30 @@ services:
       - WEATHER_CACHE_TTL_SEC=${WEATHER_CACHE_TTL_SEC:-600}
       - WEATHER_STALE_MAX_SEC=${WEATHER_STALE_MAX_SEC:-7200}
       - WEATHER_TIMEOUT_SEC=${WEATHER_TIMEOUT_SEC:-8}
+      - NOTIFICATIONS_ENABLED=${NOTIFICATIONS_ENABLED:-true}
+      - VAPID_PUBLIC_KEY_PATH=${VAPID_PUBLIC_KEY_PATH:-./config/vapid_public.pem}
+      - VAPID_PRIVATE_KEY_PATH=${VAPID_PRIVATE_KEY_PATH:-./config/vapid_private.pem}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@greenhouse.local}
+      - IRRIGATION_CHECK_SEC=${IRRIGATION_CHECK_SEC:-60}
+      - IRRIGATION_REMINDER_HOURS=${IRRIGATION_REMINDER_HOURS:-6}
+      - IRRIGATION_MIN_VALID_SENSORS=${IRRIGATION_MIN_VALID_SENSORS:-1}
+      - IRRIGATION_MAX_AGE_MIN=${IRRIGATION_MAX_AGE_MIN:-10}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
   serial-bridge:
     build:
@@ -37,20 +101,40 @@ services:
       dockerfile: Dockerfile
     container_name: greenhouse-serial
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
       - ./backend/serial_bridge:/app
+      - ./backend/api/app/automation.py:/app/automation_reference.py:ro
       - ./config:/app/config
     environment:
       - SERIAL_PORT=/dev/ttyUSB0
       - SERIAL_BAUDRATE=115200
       - SIMULATE=${SIMULATE:-true}
-      - SIM_TELEMETRY_INTERVAL_SEC=30
-      - SIM_PHOTO_INTERVAL_MIN=30
-      - SIM_FIRST_PHOTO_DELAY_SEC=30
+      - SIM_TELEMETRY_INTERVAL_SEC=${SIM_TELEMETRY_INTERVAL_SEC:-30}
+      - SIM_PHOTO_INTERVAL_MIN=${SIM_PHOTO_INTERVAL_MIN:-30}
+      - SIM_FIRST_PHOTO_DELAY_SEC=${SIM_FIRST_PHOTO_DELAY_SEC:-30}
       - API_URL=http://api:8000
+      - DEVICE_API_TOKEN=${DEVICE_API_TOKEN:?DEVICE_API_TOKEN must be set in .env}
+      - BRIDGE_HTTP_PORT=8081
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   frontend:
     build:
@@ -59,15 +143,28 @@ services:
     container_name: greenhouse-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "5173:80"
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000/api/config/ws
+      # Fail2ban reads this file from the host.
+      - ./data/logs/nginx:/var/log/nginx
+    security_opt:
+      - no-new-privileges:true
     depends_on:
-      - api
-
-volumes:
-  greenhouse_data:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M

@@ -1,119 +1,292 @@
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Outlet, Link, useLocation, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTelemetry } from '../context/TelemetryContext'
+import { useDialog } from '../hooks/useDialog'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { useIrrigationAlerts } from '../hooks/useIrrigationAlerts'
+import { NotificationBell } from './NotificationBell'
+import { InstallHint, InstallPrompt } from './InstallPrompt'
+import { PwaStatus } from './PwaStatus'
+import { RouteAnnouncer } from './RouteAnnouncer'
+
+function DeviceBadges({ status }) {
+  if (!status) return null
+  const devices = [
+    { key: 'field', label: 'Campo', icon: '🌿', online: status.field_esp32_online },
+    { key: 'gateway', label: 'Gateway', icon: '📡', online: status.gateway_esp32_online },
+    { key: 'camera', label: 'Cámara', icon: '📷', online: status.camera_online },
+  ]
+
+  return (
+    <div className="device-badges" aria-label="Estado de los dispositivos">
+      {devices.map(device => (
+        <span
+          key={device.key}
+          className={`device-badge ${device.online ? 'on' : 'off'}`}
+          title={`${device.label}: ${device.online ? 'en línea' : 'sin conexión'}`}
+        >
+          <span aria-hidden="true">{device.icon}</span> {device.label}
+        </span>
+      ))}
+    </div>
+  )
+}
 
 export function Layout() {
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, authOffline, refreshAuth } = useAuth()
   const { connected, status } = useTelemetry()
   const location = useLocation()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const drawerRef = useRef(null)
+
+  const pageLabel = useDocumentTitle(location.pathname)
+  useIrrigationAlerts(status)
+  useDialog(menuOpen, () => setMenuOpen(false), drawerRef)
+
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
 
   if (!user) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/admin/login" replace />
   }
 
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: '📊' },
-    { path: '/photos', label: 'Fotos', icon: '📸' },
-    { path: '/clima', label: 'Clima', icon: '🌤️' },
-    { path: '/history', label: 'Historial', icon: '📈' },
-    { path: '/events', label: 'Eventos', icon: '⚠️' },
+    { path: '/admin', label: 'Panel', icon: '🎛️', short: 'Panel' },
+    { path: '/admin/eventos', label: 'Eventos', icon: '⚠️', short: 'Eventos' },
+    { path: '/admin/historial', label: 'Historial', icon: '📈', short: 'Historial' },
+    { path: '/admin/fotos', label: 'Fotos', icon: '📸', short: 'Fotos' },
+    { path: '/admin/clima', label: 'Clima', icon: '🌤️', short: 'Clima' },
+    { path: '/admin/cultivos', label: 'Cultivos', icon: '🌱', short: 'Cultivos' },
+    { path: '/admin/configuracion', label: 'Configuración', icon: '⚙️', short: 'Config' },
+    { path: '/admin/logs', label: 'Auditoría', icon: '📋', short: 'Logs' },
+    { path: '/admin/usuarios', label: 'Usuarios', icon: '👥', short: 'Usuarios' },
   ]
 
-  if (isAdmin) {
-    navItems.push(
-      { path: '/config', label: 'Configuración', icon: '⚙️' },
-      { path: '/crops', label: 'Cultivos', icon: '🌱' }
-    )
-  }
+  const primaryItems = navItems.filter(item =>
+    ['/admin', '/admin/fotos', '/admin/eventos', '/admin/logs'].includes(item.path)
+  )
+
+  const isCurrent = path => location.pathname === path
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header style={{
-        background: 'var(--color-card)',
-        borderBottom: '1px solid var(--color-border)',
-        padding: '0.75rem 1rem',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '1rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <Link to="/" style={{ fontWeight: 700, fontSize: '1.25rem', color: 'var(--color-primary-dark)' }}>
-            🌱 Invernadero
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Saltar al contenido
+      </a>
+      <RouteAnnouncer pathname={location.pathname} label={pageLabel} />
+
+      <header className="app-header">
+        <div className="app-header-inner">
+          <Link to="/admin" className="brand" aria-label="Invernadero — panel de administración">
+            <span className="brand-mark" aria-hidden="true">
+              🌱
+            </span>
+            <span>Invernadero</span>
           </Link>
-          <nav style={{ display: 'flex', gap: '0.25rem' }}>
+
+          <nav className="desktop-nav" aria-label="Navegación principal">
             {navItems.map(item => (
               <Link
                 key={item.path}
                 to={item.path}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.375rem',
-                  padding: '0.5rem 0.875rem',
-                  borderRadius: 'var(--radius-sm)',
-                  color: location.pathname === item.path ? 'var(--color-primary)' : 'var(--color-text)',
-                  background: location.pathname === item.path ? 'rgba(45, 106, 79, 0.1)' : 'transparent',
-                  fontWeight: 500,
-                  fontSize: '0.875rem',
-                }}
+                className="nav-link"
+                aria-current={isCurrent(item.path) ? 'page' : undefined}
               >
-                <span>{item.icon}</span> {item.label}
+                <span className="nav-icon" aria-hidden="true">
+                  {item.icon}
+                </span>
+                {item.label}
               </Link>
             ))}
           </nav>
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.8125rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-            <span className={`status-dot ${connected ? 'online' : 'offline'}`}></span>
-            <span>{connected ? 'Conectado' : 'Desconectado'}</span>
-          </div>
+          <div className="header-actions">
+            <DeviceBadges status={status} />
 
-          {status && (
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <span className={`badge ${status.field_esp32_online ? 'badge-on' : 'badge-off'}`}>
-                🌿 Campo
+            <span
+              className="conn-pill"
+              role="status"
+              aria-live="polite"
+              aria-label={connected ? 'Datos en vivo conectados' : 'Sin conexión en tiempo real, reconectando'}
+              title={connected ? 'WebSocket conectado' : 'Sin conexión en tiempo real'}
+            >
+              <span
+                className={`status-dot ${connected ? 'online' : 'offline'}`}
+                aria-hidden="true"
+              />
+              <span className="conn-label">{connected ? 'En vivo' : 'Reconectando'}</span>
+            </span>
+
+            <NotificationBell />
+
+            <div className="user-menu">
+              <span className="username" title={user.username}>
+                {user.username}
               </span>
-              <span className={`badge ${status.gateway_esp32_online ? 'badge-on' : 'badge-off'}`}>
-                📡 Gateway
-              </span>
-              <span className={`badge ${status.camera_online ? 'badge-on' : 'badge-off'}`}>
-                📷 Cámara
-              </span>
+              <button type="button" onClick={logout} className="btn btn-secondary btn-sm">
+                Salir
+              </button>
             </div>
-          )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ color: 'var(--color-text-muted)' }}>{user.username}</span>
-            <span style={{ color: 'var(--color-border)' }}>|</span>
-            <button onClick={logout} className="btn btn-secondary btn-sm">
-              Salir
+            <button
+              type="button"
+              className="icon-btn menu-btn"
+              aria-label="Abrir menú de navegación"
+              aria-expanded={menuOpen}
+              aria-controls="app-drawer"
+              onClick={() => setMenuOpen(true)}
+            >
+              <span aria-hidden="true">☰</span>
             </button>
           </div>
         </div>
       </header>
 
-      <main style={{ flex: 1, padding: '1.5rem 1rem' }}>
+      <main id="main-content" className="app-main" tabIndex={-1}>
         <div className="container">
+          <InstallPrompt />
+          {authOffline && (
+            <div className="alert alert-warning" role="status">
+              <span style={{ flex: 1 }}>
+                Sin conexión con el servidor. Se muestra la última sesión conocida; los datos
+                pueden estar desactualizados.
+              </span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={refreshAuth}>
+                Reintentar
+              </button>
+            </div>
+          )}
           <Outlet />
         </div>
       </main>
 
-      <footer style={{
-        padding: '1rem',
-        textAlign: 'center',
-        color: 'var(--color-text-muted)',
-        fontSize: '0.75rem',
-        borderTop: '1px solid var(--color-border)',
-        background: 'var(--color-card)',
-      }}>
-        Invernadero Automatizado - Santa Lucía Cotzumalguapa, Escuintla, Guatemala
+      <footer className="app-footer">
+        Invernadero Automatizado · Santa Lucía Cotzumalguapa, Escuintla, Guatemala
       </footer>
+
+      <nav className="bottom-nav" aria-label="Accesos rápidos">
+        {primaryItems.map(item => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className="bottom-nav-item"
+            aria-current={isCurrent(item.path) ? 'page' : undefined}
+          >
+            <span className="bottom-nav-icon" aria-hidden="true">
+              {item.icon}
+            </span>
+            {item.short}
+          </Link>
+        ))}
+        <button
+          type="button"
+          className={`bottom-nav-item${menuOpen ? ' active' : ''}`}
+          aria-label="Abrir menú de navegación"
+          aria-expanded={menuOpen}
+          aria-controls="app-drawer"
+          onClick={() => setMenuOpen(true)}
+        >
+          <span className="bottom-nav-icon" aria-hidden="true">
+            ☰
+          </span>
+          Menú
+        </button>
+      </nav>
+
+      {menuOpen &&
+        createPortal(
+          <div
+            className="drawer-scrim"
+            onMouseDown={event => {
+              if (event.target === event.currentTarget) setMenuOpen(false)
+            }}
+          >
+            <aside
+              id="app-drawer"
+              ref={drawerRef}
+              className="drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Menú de navegación"
+              tabIndex={-1}
+            >
+              <div className="drawer-header">
+                <span className="brand">
+                  <span className="brand-mark" aria-hidden="true">
+                    🌱
+                  </span>
+                  <span>Invernadero</span>
+                </span>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Cerrar menú"
+                  onClick={() => setMenuOpen(false)}
+                  data-autofocus
+                >
+                  ×
+                </button>
+              </div>
+
+              <nav className="drawer-nav" aria-label="Navegación principal">
+                {navItems.map(item => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className="drawer-link"
+                    aria-current={isCurrent(item.path) ? 'page' : undefined}
+                  >
+                    <span aria-hidden="true">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+
+              <div className="drawer-section">
+                <div className="drawer-section-title">Estado</div>
+                <div
+                  className="status-indicator"
+                  style={{ marginBottom: '0.5rem' }}
+                  aria-live="polite"
+                >
+                  <span
+                    className={`status-dot ${connected ? 'online' : 'offline'}`}
+                    aria-hidden="true"
+                  />
+                  {connected ? 'Datos en vivo' : 'Reconectando…'}
+                </div>
+                <DeviceBadges status={status} />
+              </div>
+
+              <div className="drawer-section">
+                <InstallHint />
+              </div>
+
+              <div className="drawer-section" style={{ marginTop: 'auto' }}>
+                <div className="drawer-user">
+                  <div>
+                    <div className="drawer-section-title" style={{ marginBottom: '0.15rem' }}>
+                      Sesión
+                    </div>
+                    <strong>{user.username}</strong>
+                    <div className="form-hint">
+                      {isAdmin ? 'Administrador' : 'Solo lectura'}
+                    </div>
+                  </div>
+                  <button type="button" onClick={logout} className="btn btn-secondary btn-sm">
+                    Salir
+                  </button>
+                </div>
+              </div>
+            </aside>
+          </div>,
+          document.body
+        )}
+
+      <PwaStatus />
     </div>
   )
 }

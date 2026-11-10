@@ -1,7 +1,14 @@
 import asyncio
+import logging
+
 from sqlalchemy import select
+
+from app.config import settings
 from app.models import Base, User, Crop, CropParam, ActiveConfig
-from app.auth import get_password_hash
+from app.auth import get_password_hash, verify_password
+from app.password_policy import validate_password_strength
+
+logger = logging.getLogger(__name__)
 
 
 CROPS_DATA = [
@@ -298,7 +305,12 @@ DEFAULT_CONFIG = {
             "fan": 7200,
             "humidifier": 7200,
             "pump": 900,
-        }
+        },
+        "min_off_seconds": {
+            "fan": 0,
+            "humidifier": 0,
+            "pump": 300,
+        },
     },
 }
 
@@ -314,28 +326,60 @@ async def ensure_seed_data(session_factory=None):
         session_factory = AsyncSessionLocal
 
     async with session_factory() as db:
-        admin_result = await db.execute(select(User).where(User.username == "admin"))
+        admin_result = await db.execute(
+            select(User).where(User.username == settings.ADMIN_USERNAME)
+        )
         admin = admin_result.scalar_one_or_none()
-        if not admin:
+        if not admin and settings.ADMIN_PASSWORD:
+            errors = validate_password_strength(
+                settings.ADMIN_PASSWORD, settings.ADMIN_USERNAME
+            )
+            if errors:
+                raise RuntimeError(
+                    "ADMIN_PASSWORD does not meet the password policy: "
+                    + "; ".join(errors)
+                )
             admin = User(
-                username="admin",
-                email="admin@greenhouse.local",
-                hashed_password=get_password_hash("admin123"),
+                username=settings.ADMIN_USERNAME,
+                email=settings.ADMIN_EMAIL,
+                hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
                 role="admin",
                 is_active=True,
             )
             db.add(admin)
             await db.flush()
+            logger.info("Initial admin account '%s' created", settings.ADMIN_USERNAME)
+        elif not admin:
+            # Fail closed: never ship a known default password. The operator
+            # must set ADMIN_PASSWORD (or register a user in another way).
+            logger.error(
+                "No admin account exists and ADMIN_PASSWORD is empty. "
+                "Set ADMIN_PASSWORD to create the initial administrator."
+            )
+
+        # Migrate a database created by an older release: replace the known
+        # admin123 password with the operator-provided one and disable the
+        # legacy viewer123 account.
+        if admin and settings.ADMIN_PASSWORD:
+            try:
+                if verify_password("admin123", admin.hashed_password):
+                    admin.hashed_password = get_password_hash(settings.ADMIN_PASSWORD)
+                    logger.warning("Replaced the legacy admin123 password")
+            except Exception:
+                pass
 
         viewer_result = await db.execute(select(User).where(User.username == "viewer"))
-        if not viewer_result.scalar_one_or_none():
-            db.add(User(
-                username="viewer",
-                email="viewer@greenhouse.local",
-                hashed_password=get_password_hash("viewer123"),
-                role="viewer",
-                is_active=True,
-            ))
+        viewer = viewer_result.scalar_one_or_none()
+        if viewer is not None:
+            try:
+                if viewer.is_active and verify_password("viewer123", viewer.hashed_password):
+                    viewer.is_active = False
+                    logger.warning("Disabled the legacy viewer123 account")
+            except Exception:
+                pass
+
+        # Never seed viewer123/admin123. The bridge authenticates with
+        # DEVICE_API_TOKEN, not a built-in user account.
 
         first_crop_id = None
         for crop_data in CROPS_DATA:
@@ -360,7 +404,7 @@ async def ensure_seed_data(session_factory=None):
                 config_json=DEFAULT_CONFIG,
                 version=1,
                 crop_id=first_crop_id,
-                applied_by=admin.id,
+                applied_by=admin.id if admin else None,
                 esp32_confirmed=False,
             ))
 

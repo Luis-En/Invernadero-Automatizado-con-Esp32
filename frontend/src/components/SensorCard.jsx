@@ -1,4 +1,4 @@
-export function SensorCard({ label, value, unit, status = 'normal', row, id }) {
+export function SensorCard({ label, value, unit, status = 'normal', row }) {
   const statusClass = status === 'warning' ? 'warning' : status === 'critical' ? 'critical' : ''
 
   return (
@@ -35,10 +35,13 @@ export function ActuatorCard({ name, icon, state, onToggle, disabled, loading })
       <button
         onClick={onToggle}
         disabled={disabled || loading}
+        aria-pressed={Boolean(state)}
+        aria-busy={loading || undefined}
+        aria-label={`${state ? 'Apagar' : 'Encender'} ${name}`}
         className={`btn ${state ? 'btn-danger' : 'btn-primary'}`}
         style={{ minWidth: '100px' }}
       >
-        {loading ? '...' : state ? 'Apagar' : 'Encender'}
+        {loading ? '…' : state ? 'Apagar' : 'Encender'}
       </button>
     </div>
   )

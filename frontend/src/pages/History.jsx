@@ -1,6 +1,7 @@
 import { useTelemetry } from '../context/TelemetryContext'
 import { MultiChart } from '../components/Charts'
 import { format } from 'date-fns'
+import { formatServerTime } from '../utils/time'
 
 function numericValues(data, selector) {
   return data
@@ -41,8 +42,8 @@ export function History() {
   const minHum = hums.length ? Math.min(...hums) : null
   const maxHum = hums.length ? Math.max(...hums) : null
 
-  const periodStart = data.length ? format(new Date(data[0].timestamp), 'dd/MM HH:mm') : '—'
-  const periodEnd = data.length ? format(new Date(data[data.length - 1].timestamp), 'dd/MM HH:mm') : '—'
+  const periodStart = data.length ? formatServerTime(data[0].timestamp, d => format(d, 'dd/MM HH:mm')) : '—'
+  const periodEnd = data.length ? formatServerTime(data[data.length - 1].timestamp, d => format(d, 'dd/MM HH:mm')) : '—'
 
   return (
     <div>
@@ -51,8 +52,13 @@ export function History() {
           <h1 className="page-title">Historial de Sensores</h1>
           <p style={{ color: 'var(--color-text-muted)' }}>Gráficas históricas de temperatura, humedad y humedad del suelo</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="page-actions">
+          <label className="form-label" htmlFor="history-range" style={{ margin: 0 }}>
+            Rango
+          </label>
           <select
+            id="history-range"
+            aria-label="Rango de historial"
             value={historyHours}
             onChange={e => setTimeRange(Number(e.target.value))}
             className="form-control"
@@ -112,11 +118,11 @@ export function History() {
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Mínima:</span>
-                  <strong style={{ color: '#1e88e5' }}>{fmt(minTemp, ' °C')}</strong>
+                  <strong style={{ color: 'var(--color-info-strong)' }}>{fmt(minTemp, ' °C')}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Máxima:</span>
-                  <strong style={{ color: '#e53935' }}>{fmt(maxTemp, ' °C')}</strong>
+                  <strong style={{ color: 'var(--color-critical)' }}>{fmt(maxTemp, ' °C')}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Rango:</span>
@@ -134,11 +140,11 @@ export function History() {
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Mínima:</span>
-                  <strong style={{ color: '#e53935' }}>{fmt(minHum, ' %')}</strong>
+                  <strong style={{ color: 'var(--color-critical)' }}>{fmt(minHum, ' %')}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span>Máxima:</span>
-                  <strong style={{ color: '#1e88e5' }}>{fmt(maxHum, ' %')}</strong>
+                  <strong style={{ color: 'var(--color-info-strong)' }}>{fmt(maxHum, ' %')}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Rango:</span>

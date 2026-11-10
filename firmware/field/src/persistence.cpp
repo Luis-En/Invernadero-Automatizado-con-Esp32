@@ -56,6 +56,20 @@ bool Persistence::hasConfig() {
   return prefs.isKey("config");
 }
 
+bool Persistence::saveLastSeq(uint16_t seq) {
+  if (!ready_) {
+    return false;
+  }
+  return prefs.putUShort("cmd_seq", seq) == sizeof(uint16_t);
+}
+
+uint16_t Persistence::loadLastSeq() {
+  if (!ready_) {
+    return 0;
+  }
+  return prefs.getUShort("cmd_seq", 0);
+}
+
 bool Persistence::saveCalibration(const SensorManager::Calibration* calibration, size_t count) {
   if (!ready_) {
     return false;

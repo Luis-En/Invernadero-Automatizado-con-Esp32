@@ -1,0 +1,190 @@
+# Dokploy deployment with Cloudflare Tunnel.
+#
+# This file is self-contained: use it as the Compose path in Dokploy.
+# It keeps persistent data in named volumes, generates VAPID keys on the
+# first boot, and runs cloudflared in the same network as the frontend.
+#
+# Required Dokploy environment variables:
+#   JWT_SECRET_KEY, DEVICE_API_TOKEN, ADMIN_PASSWORD, CLOUDFLARE_TUNNEL_TOKEN
+# Recommended:
+#   PUBLIC_BASE_URL, CORS_ORIGINS, OPENWEATHER_API_KEY
+#
+# The serial-bridge service is behind the "serial" profile. On a VPS leave it
+# disabled and run the bridge on the Raspberry Pi pointing API_URL at the
+# public HTTPS domain. On a Dokploy host with the gateway plugged in, deploy
+# with --profile serial and set SERIAL_DEVICE.
+
+services:
+  api:
+    build:
+      context: ./backend/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - greenhouse_data:/app/data
+      - vapid_keys:/app/secrets
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: sqlite+aiosqlite:///./data/greenhouse.db
+      PHOTO_STORAGE_PATH: /app/data/photos
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      AUTH_COOKIE_SECURE: "true"
+      AUTH_COOKIE_SAMESITE: lax
+      REQUIRE_HTTPS: "true"
+      ENABLE_DOCS: "false"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@greenhouse.local}
+      DEVICE_API_TOKEN: ${DEVICE_API_TOKEN:?DEVICE_API_TOKEN must be set}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_STORAGE_URI: ${RATE_LIMIT_STORAGE_URI:-memory://}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-5/minute}
+      RATE_LIMIT_ACTUATOR: ${RATE_LIMIT_ACTUATOR:-10/minute}
+      RATE_LIMIT_WRITE: ${RATE_LIMIT_WRITE:-30/minute}
+      RATE_LIMIT_PHOTOS: ${RATE_LIMIT_PHOTOS:-600/minute}
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+      LOGIN_WINDOW_SEC: ${LOGIN_WINDOW_SEC:-900}
+      LOGIN_LOCKOUT_SEC: ${LOGIN_LOCKOUT_SEC:-900}
+      LOGIN_IP_MAX_FAILURES: ${LOGIN_IP_MAX_FAILURES:-20}
+      LOGIN_IP_WINDOW_SEC: ${LOGIN_IP_WINDOW_SEC:-900}
+      LOGIN_IP_LOCKOUT_SEC: ${LOGIN_IP_LOCKOUT_SEC:-3600}
+      AUDIT_LOG_ENABLED: ${AUDIT_LOG_ENABLED:-true}
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
+      VAPID_PUBLIC_KEY_PATH: /app/secrets/vapid_public.pem
+      VAPID_PRIVATE_KEY_PATH: /app/secrets/vapid_private.pem
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@greenhouse.local}
+      VAPID_AUTO_GENERATE: "true"
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY:-}
+      WEATHER_ENABLED: ${WEATHER_ENABLED:-true}
+      WEATHER_LAT: ${WEATHER_LAT:-14.3333}
+      WEATHER_LON: ${WEATHER_LON:--91.0167}
+      WEATHER_LOCATION_NAME: ${WEATHER_LOCATION_NAME:-Santa Lucía Cotzumalguapa}
+      WEATHER_UNITS: ${WEATHER_UNITS:-metric}
+      WEATHER_LANG: ${WEATHER_LANG:-es}
+      WEATHER_CACHE_TTL_SEC: ${WEATHER_CACHE_TTL_SEC:-600}
+      WEATHER_STALE_MAX_SEC: ${WEATHER_STALE_MAX_SEC:-7200}
+      WEATHER_TIMEOUT_SEC: ${WEATHER_TIMEOUT_SEC:-8}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  serial-bridge:
+    build:
+      context: ./backend/serial_bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    profiles: ["serial"]
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
+    volumes:
+      - ./config:/app/config:ro
+      - ./backend/api/app/automation.py:/app/automation_reference.py:ro
+      - greenhouse_data:/app/data
+    environment:
+      SERIAL_PORT: /dev/ttyUSB0
+      SERIAL_BAUDRATE: "115200"
+      SIMULATE: ${SIMULATE:-false}
+      API_URL: http://api:8000
+      DEVICE_API_TOKEN: ${DEVICE_API_TOKEN:?DEVICE_API_TOKEN must be set}
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NGINX_CONF: nginx.production.conf
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:80"
+    volumes:
+      - ../files/nginx-logs:/var/log/nginx
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN must be set}
+    depends_on:
+      frontend:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  greenhouse_data:
+  vapid_keys:

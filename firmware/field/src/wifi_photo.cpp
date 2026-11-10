@@ -35,7 +35,12 @@ class PhotoRawHandler : public RequestHandler {
   bool handle(WebServer& server, HTTPMethod method, String uri) override {
     (void)method;
     (void)uri;
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
+    if (wifiPhoto.lastUploadAccepted()) {
+      server.send(200, "application/json", "{\"status\":\"ok\"}");
+    } else {
+      server.send(503, "application/json",
+                  "{\"status\":\"rejected\",\"reason\":\"photo buffer unavailable\"}");
+    }
     return true;
   }
 };
@@ -102,16 +107,19 @@ void WifiPhotoReceiver::handleRaw(const HTTPRaw& raw) {
     case RAW_START:
       raw_length_ = 0;
       raw_overflow_ = false;
+      last_upload_accepted_ = false;
       raw_sequence_ = nextSequence();
       rx_index_ = freeBufferIndex();
-      if (rx_index_ < 0) {
+      if (rx_index_ < 0 || buffers_[rx_index_] == nullptr) {
         raw_overflow_ = true;
-        Serial.println("[photo] both buffers busy, upload rejected");
+        rx_index_ = -1;
+        Serial.println("[photo] no free buffer, upload rejected");
       }
       break;
 
     case RAW_WRITE:
-      if (rx_index_ < 0 || raw_overflow_) {
+      if (rx_index_ < 0 || raw_overflow_ || buffers_[rx_index_] == nullptr ||
+          raw.buf == nullptr) {
         raw_overflow_ = true;
         break;
       }
@@ -124,10 +132,12 @@ void WifiPhotoReceiver::handleRaw(const HTTPRaw& raw) {
       break;
 
     case RAW_END:
-      if (rx_index_ >= 0 && !raw_overflow_ && raw_length_ > 0) {
+      if (rx_index_ >= 0 && buffers_[rx_index_] != nullptr &&
+          !raw_overflow_ && raw_length_ > 0) {
         buffer_length_[rx_index_] = raw_length_;
         buffer_sequence_[rx_index_] = raw_sequence_;
         frames_received_++;
+        last_upload_accepted_ = true;
 
         Serial.printf("[photo] frame %u received over WiFi: %u bytes\n",
                       (unsigned)raw_sequence_, (unsigned)raw_length_);
@@ -147,6 +157,7 @@ void WifiPhotoReceiver::handleRaw(const HTTPRaw& raw) {
                         (unsigned)raw_sequence_);
         } else {
           frames_rejected_++;
+          last_upload_accepted_ = false;
           Serial.println("[photo] send queue full, frame dropped");
         }
       } else {
@@ -161,6 +172,7 @@ void WifiPhotoReceiver::handleRaw(const HTTPRaw& raw) {
 
     case RAW_ABORTED:
       frames_rejected_++;
+      last_upload_accepted_ = false;
       rx_index_ = -1;
       Serial.println("[photo] upload aborted");
       break;
@@ -194,7 +206,8 @@ void WifiPhotoReceiver::startSending(int8_t index) {
 }
 
 void WifiPhotoReceiver::sendNextChunk() {
-  if (send_index_ < 0 || tx_next_chunk_ >= tx_total_) {
+  if (send_index_ < 0 || buffers_[send_index_] == nullptr ||
+      tx_next_chunk_ >= tx_total_) {
     return;
   }
 

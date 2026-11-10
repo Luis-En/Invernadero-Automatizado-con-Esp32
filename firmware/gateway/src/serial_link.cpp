@@ -68,6 +68,17 @@ void SerialLink::sendConfigAck(uint16_t version, uint8_t command, uint8_t status
   emit(doc);
 }
 
+void SerialLink::sendActuatorAck(const char* command_id, const char* actuator,
+                                 bool state, const char* status) {
+  StaticJsonDocument<256> doc;
+  doc["type"] = "actuator_ack";
+  doc["command_id"] = command_id != nullptr ? command_id : "";
+  doc["actuator"] = actuator != nullptr ? actuator : "";
+  doc["state"] = state;
+  doc["status"] = status != nullptr ? status : "error";
+  emit(doc);
+}
+
 void SerialLink::sendEvent(const char* severity, const char* code, const char* message) {
   DynamicJsonDocument doc(json_builder::kEventCapacity);
   char timestamp[24];
@@ -163,6 +174,15 @@ void SerialLink::processLine(char* line) {
     command.target = parseTarget(inbound_["target"] | "field");
   } else if (strcmp(type, "ping") == 0) {
     command.kind = InboundKind::Ping;
+  } else if (strcmp(type, "set_actuator") == 0) {
+    command.kind = InboundKind::SetActuator;
+    const char* actuator = inbound_["actuator"] | "";
+    strncpy(command.actuator, actuator, sizeof(command.actuator) - 1);
+    command.actuator[sizeof(command.actuator) - 1] = '\0';
+    command.state = inbound_["state"] | false;
+    const char* commandId = inbound_["command_id"] | "";
+    strncpy(command.command_id, commandId, sizeof(command.command_id) - 1);
+    command.command_id[sizeof(command.command_id) - 1] = '\0';
   } else {
     command.kind = InboundKind::Unknown;
   }

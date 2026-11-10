@@ -19,9 +19,23 @@ class FieldLink {
  public:
   using ConfigAppliedCallback = void (*)(const RuntimeConfig& config);
   using ManualOverrideCallback = void (*)(const bool values[ACT_COUNT]);
+  using ActuatorCommandCallback = bool (*)(uint8_t index, bool state);
+  using SeqPersistCallback = void (*)(uint16_t seq);
 
   void begin(ConfigAppliedCallback on_config);
+  void setSeqPersistCallback(SeqPersistCallback cb) { seq_callback_ = cb; }
+  void setLastCommandSeq(uint16_t seq) { last_command_seq_ = seq; }
   void setManualOverrideCallback(ManualOverrideCallback cb) { manual_callback_ = cb; }
+  void setActuatorCommandCallback(ActuatorCommandCallback cb) { actuator_callback_ = cb; }
+
+  // Reject config pushes older than the version already persisted in NVS.
+  void setMinConfigVersion(uint16_t version) { min_config_version_ = version; }
+
+  // Pin the gateway MAC instead of learning it from the first command.
+  void setGatewayMac(const uint8_t mac[6]) {
+    memcpy(gateway_mac_, mac, 6);
+    gateway_known_ = true;
+  }
 
   // Drain inbound ESP-NOW frames and process them.
   void poll(uint32_t now_ms);
@@ -47,9 +61,6 @@ class FieldLink {
   bool timeSynced() const { return time_synced_; }
   uint32_t epochNow() const;
 
-  // True while a config push is in progress (used to log/observe).
-  bool configPending() const { return config_buffer_len_ > 0 && config_expected_crc_ != 0; }
-
  private:
   void handleFrame(const EspNowMessage& frame);
   void handleCommand(const CommandMsg& msg);
@@ -61,10 +72,13 @@ class FieldLink {
 
   ConfigAppliedCallback config_callback_ = nullptr;
   ManualOverrideCallback manual_callback_ = nullptr;
+  ActuatorCommandCallback actuator_callback_ = nullptr;
+  SeqPersistCallback seq_callback_ = nullptr;
+  uint16_t min_config_version_ = 0;
+  uint16_t last_command_seq_ = 0;
 
   // Config chunk assembly.
   uint16_t config_version_ = 0;
-  uint16_t config_expected_crc_ = 0;
   uint16_t config_total_chunks_ = 0;
   uint16_t config_received_chunks_ = 0;
   size_t config_buffer_len_ = 0;

@@ -126,6 +126,19 @@
 #define FIELD_ESPNOW_CHANNEL 6
 #define FIELD_WIFI_CHANNEL FIELD_ESPNOW_CHANNEL
 
+// Optional deployment secrets (ESP-NOW PMK/LMK and the fixed gateway MAC).
+// Copy espnow_secrets.example.h to espnow_secrets.h on the build machine and
+// never commit the real values.
+#if __has_include("espnow_secrets.h")
+#include "espnow_secrets.h"
+#endif
+
+#ifndef FIELD_GATEWAY_MAC
+// All-zero means "discover the gateway from its first command". Set a real
+// MAC in espnow_secrets.h for a deployed greenhouse.
+#define FIELD_GATEWAY_MAC {0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+#endif
+
 // ---------------------------------------------------------------------------
 // Camera Wi-Fi link. The ESP32-CAM connects to the AP this node raises and
 // POSTs the JPEG to /photo. The node then forwards fragments over ESP-NOW.
@@ -151,16 +164,11 @@
 #define FIELD_NO_BME280 (!FIELD_HAS_BME280)
 #endif
 
-// Diagnostic build: print every photo chunk received from the camera over the
-// USB serial port and skip ESP-NOW forwarding. Used to validate the camera ->
-// field UART link on hardware without a gateway. Enable with -DFIELD_PHOTO_TEST=1.
-#ifndef FIELD_PHOTO_TEST
-#define FIELD_PHOTO_TEST 0
-#endif
-
 // Calibration-only build: skip Wi-Fi/ESP-NOW entirely so a node on a weak USB
 // supply (which browns out when the radio starts) can still boot and accept
 // the CAL commands. Calibration lives in NVS and survives the reflash.
 #ifndef FIELD_CALIBRATION_ONLY
 #define FIELD_CALIBRATION_ONLY 0
 #endif
+
+

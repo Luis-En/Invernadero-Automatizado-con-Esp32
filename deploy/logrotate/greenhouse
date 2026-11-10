@@ -1,0 +1,19 @@
+# Rotación del access log de Nginx para Fail2ban/auditoría.
+# Instalar:
+#   sudo cp deploy/logrotate/greenhouse /etc/logrotate.d/greenhouse
+#   sudo sed -i "s|__PROJECT_DIR__|$PWD|" /etc/logrotate.d/greenhouse
+#   sudo logrotate -d /etc/logrotate.d/greenhouse
+
+__PROJECT_DIR__/data/logs/nginx/*.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+    sharedscripts
+    postrotate
+        docker kill -s USR1 greenhouse-frontend >/dev/null 2>&1 || true
+    endscript
+}

@@ -17,9 +17,11 @@ async def list_crops(db: AsyncSession = Depends(get_db), user=Depends(get_curren
     return result.scalars().all()
 
 
-@router.get("/all", response_model=List[CropResponse])
+@router.get("/all", response_model=List[CropWithParamsResponse])
 async def list_all_crops(db: AsyncSession = Depends(get_db), admin=Depends(get_admin_user)):
-    result = await db.execute(select(Crop).order_by(Crop.name))
+    result = await db.execute(
+        select(Crop).options(selectinload(Crop.params)).order_by(Crop.name)
+    )
     return result.scalars().all()
 
 

@@ -11,6 +11,13 @@
 
 SensorManager sensors;
 
+// A probe that repeats the same value for kStuckSamples cycles is treated as
+// frozen. The epsilons are above normal ADC/LSB quantization but far below a
+// real environmental change over 80 s.
+static const float kSoilStuckEpsilon = 0.05f;
+static const float kTempStuckEpsilon = 0.02f;
+static const float kHumidityStuckEpsilon = 0.05f;
+
 namespace {
 #if !FIELD_NO_BME280
 Adafruit_BME280 bme;
@@ -76,6 +83,8 @@ void SensorManager::begin() {
   delay(5);
 
   Wire.begin(FIELD_I2C_SDA, FIELD_I2C_SCL);
+  // Bound an I2C transaction so a wedged bus cannot stall the control loop.
+  Wire.setTimeOut(50);
   delay(10);
   scanI2cBus();
   bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire) || bme.begin(0x77, &Wire);
@@ -105,6 +114,33 @@ void SensorManager::begin() {
   loadCalibration();
 }
 
+void SensorManager::resetStuck(StuckWindow& window) {
+  window.index = 0;
+  window.count = 0;
+}
+
+bool SensorManager::updateStuck(StuckWindow& window, float value, float epsilon) {
+  if (isnan(value)) {
+    resetStuck(window);
+    return false;
+  }
+  window.samples[window.index] = value;
+  window.index = (uint8_t)((window.index + 1) % kStuckSamples);
+  if (window.count < kStuckSamples) {
+    window.count++;
+  }
+  if (window.count < kStuckSamples) {
+    return false;
+  }
+  float min_value = window.samples[0];
+  float max_value = window.samples[0];
+  for (uint8_t i = 1; i < kStuckSamples; i++) {
+    if (window.samples[i] < min_value) min_value = window.samples[i];
+    if (window.samples[i] > max_value) max_value = window.samples[i];
+  }
+  return (max_value - min_value) <= epsilon;
+}
+
 float SensorManager::readSoilPercent(uint8_t index, uint16_t adc) const {
   const Calibration& cal = calibration_[index];
   if (cal.dry_adc <= cal.wet_adc) {
@@ -120,12 +156,25 @@ float SensorManager::readSoilPercent(uint8_t index, uint16_t adc) const {
 void SensorManager::read(SensorSnapshot& out) {
   for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
 #if FIELD_SOIL_SCAN
-    // Diagnostic scan: read every pin and report the raw ADC even when it is
-    // outside the plausible soil range, so a bench probe can be located.
-    uint16_t adc = readAdcAveraged(soil_pins_[i]);
+    // Diagnostic scan: read every ADC1 pin and report the raw value even when
+    // it is outside the plausible soil range, so a bench probe can be located.
+    // GPIO25/26 are ADC2 and are unusable while the radio is active; skip
+    // them instead of printing a misleading value.
+    const uint8_t scan_pin = soil_pins_[i];
+    if (scan_pin < 32 || scan_pin > 39) {
+      out.soil[i].adc = 0;
+      out.soil[i].ok = false;
+      out.soil[i].pct = NAN;
+      continue;
+    }
+    uint16_t adc = readAdcAveraged(scan_pin);
     out.soil[i].adc = adc;
     out.soil[i].ok = adc >= SOIL_ADC_MIN_VALID && adc <= SOIL_ADC_MAX_VALID;
     out.soil[i].pct = out.soil[i].ok ? readSoilPercent(i, adc) : NAN;
+    if (out.soil[i].ok && updateStuck(soil_stuck_[i], out.soil[i].pct, kSoilStuckEpsilon)) {
+      out.soil[i].ok = false;
+      out.soil[i].pct = NAN;
+    }
     continue;
 #else
     // Skip probes that are not physically wired: report them invalid rather
@@ -143,6 +192,10 @@ void SensorManager::read(SensorSnapshot& out) {
     bool in_range = adc >= SOIL_ADC_MIN_VALID && adc <= SOIL_ADC_MAX_VALID;
     out.soil[i].ok = in_range;
     out.soil[i].pct = in_range ? readSoilPercent(i, adc) : NAN;
+    if (in_range && updateStuck(soil_stuck_[i], out.soil[i].pct, kSoilStuckEpsilon)) {
+      out.soil[i].ok = false;
+      out.soil[i].pct = NAN;
+    }
 #endif
   }
 
@@ -168,6 +221,15 @@ void SensorManager::read(SensorSnapshot& out) {
     if (isnan(out.temperature)) out.temperature = NAN;
     if (isnan(out.humidity)) out.humidity = NAN;
     if (isnan(out.pressure)) out.pressure = NAN;
+    if (updateStuck(temp_stuck_, out.temperature, kTempStuckEpsilon)) {
+      out.temperature = NAN;
+    }
+    if (updateStuck(humidity_stuck_, out.humidity, kHumidityStuckEpsilon)) {
+      out.humidity = NAN;
+    }
+    if (updateStuck(pressure_stuck_, out.pressure, 0.05f)) {
+      out.pressure = NAN;
+    }
   } else {
     out.temperature = NAN;
     out.humidity = NAN;

@@ -2,11 +2,29 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1b4332" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Monitoreo y automatización del invernadero: sensores de suelo, clima, riego y alertas de riego en el teléfono."
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Invernadero" />
+    <meta name="application-name" content="Invernadero" />
+    <meta name="format-detection" content="telephone=no" />
     <title>Invernadero Automatizado</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="mask-icon" href="/icons/favicon.svg" color="#1b4332" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>Esta aplicación necesita JavaScript para mostrar el invernadero.</noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -30,9 +30,14 @@ The bridge parses one message per line, verifies the CRC16 and forwards:
 | `telemetry` | `POST /api/config/telemetry` |
 | `photo_chunk` | `POST /api/photos/chunk` (hex decoded to bytes) |
 | `hello` | Logged, then the bridge sends a `timesync` line back |
-| `event` | Logged as a warning |
+| `event` | `POST /api/events/device` (persisted, shown on the Events page) |
 | `device_status` | Logged |
 | `config_ack` | Logged |
+
+Every device request sends `X-Device-Token: $DEVICE_API_TOKEN`. The API
+rejects telemetry, photo chunks, events and config confirmation without it, so
+the bridge no longer keeps a `viewer` password. If the token is missing the
+bridge logs the rejection instead of silently dropping data.
 
 Lines are `<json>*<CRC16 hex>\n`, with CRC-16/CCITT-FALSE. See
 `gateway_protocol.py`. The reader runs in a background thread with automatic

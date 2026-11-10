@@ -1,34 +1,12 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
-import { api, WS_URL } from '../api'
+import { useLocation } from 'react-router-dom'
+import { api } from '../api'
+import { useAuth } from './AuthContext'
 
 const TelemetryContext = createContext(null)
 
 const TELEMETRY_POLL_MS = 30000
-
-function telemetryToHistoryPoint(t) {
-  if (!t) return null
-  const soil = t.soil_sensors || t.soil_pct || []
-  const pct = Array.isArray(soil) && soil[0]?.pct !== undefined
-    ? soil.map(s => s.pct)
-    : soil
-  return {
-    timestamp: t.last_update || t.timestamp,
-    temperature: t.temperature ?? null,
-    humidity: t.humidity ?? null,
-    pressure: t.pressure ?? null,
-    soil_a1: pct[0] ?? null,
-    soil_a2: pct[1] ?? null,
-    soil_a3: pct[2] ?? null,
-    soil_b1: pct[3] ?? null,
-    soil_b2: pct[4] ?? null,
-    soil_b3: pct[5] ?? null,
-    fan_1: t.actuators?.fan_1 ?? false,
-    fan_2: t.actuators?.fan_2 ?? false,
-    humidifier_1: t.actuators?.humidifier_1 ?? false,
-    humidifier_2: t.actuators?.humidifier_2 ?? false,
-    pump: t.actuators?.pump ?? false,
-  }
-}
+const PUBLIC_POLL_MS = 60000
 
 function wsPayloadToHistoryPoint(data) {
   const adc = data.soil_pct || []
@@ -52,46 +30,58 @@ function wsPayloadToHistoryPoint(data) {
 }
 
 export function TelemetryProvider({ children }) {
+  const { user } = useAuth()
+  const location = useLocation()
+  // On public pages the page has its own live feed. The admin poll is only
+  // needed for the alert bell and the local notification fallback, so keep it
+  // lightweight instead of opening a second WebSocket.
+  const adminArea = location.pathname.startsWith('/admin')
   const [telemetry, setTelemetry] = useState(null)
   const [history, setHistory] = useState([])
   const [historyHours, setHistoryHours] = useState(24)
   const [status, setStatus] = useState(null)
   const [connected, setConnected] = useState(false)
+  const [error, setError] = useState('')
   const wsRef = useRef(null)
   const reconnectRef = useRef(null)
   const shouldReconnectRef = useRef(true)
+  const historyHoursRef = useRef(historyHours)
+  historyHoursRef.current = historyHours
 
   const fetchLatest = useCallback(async () => {
     try {
       const data = await api.getLatestTelemetry()
       setTelemetry(data)
+      setError('')
     } catch (e) {
-      console.error('Failed to fetch telemetry:', e)
+      setError(e.message || 'No se pudo cargar la telemetría')
     }
   }, [])
 
-  const fetchHistory = useCallback(async (hours = historyHours) => {
+  const fetchHistory = useCallback(async (hours) => {
+    const target = hours ?? historyHoursRef.current
     try {
-      const data = await api.getTelemetryHistory(hours)
+      const data = await api.getTelemetryHistory(target)
       setHistory(data)
     } catch (e) {
-      console.error('Failed to fetch history:', e)
+      setError(e.message || 'No se pudo cargar el historial')
     }
-  }, [historyHours])
+  }, [])
 
   const fetchStatus = useCallback(async () => {
     try {
       const data = await api.getSystemStatus()
       setStatus(data)
     } catch (e) {
-      console.error('Failed to fetch status:', e)
+      setError(e.message || 'No se pudo cargar el estado del sistema')
     }
   }, [])
 
   const connectWS = useCallback(() => {
+    // The WebSocket authenticates with the HttpOnly session cookie.
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
-    const ws = new WebSocket(WS_URL)
+    const ws = new WebSocket(api.getWsUrl())
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -109,7 +99,8 @@ export function TelemetryProvider({ children }) {
           setTelemetry(prev => ({ ...(prev || {}), ...message.data }))
           const point = wsPayloadToHistoryPoint(message.data)
           setHistory(prev => [...prev.slice(-499), point])
-        } else if (message.type === 'config_update' || message.type === 'config_confirmed') {
+        } else if (message.type === 'config_update' || message.type === 'config_confirmed' ||
+                   message.type === 'event') {
           fetchLatest()
           fetchStatus()
         }
@@ -137,15 +128,28 @@ export function TelemetryProvider({ children }) {
 
   useEffect(() => {
     shouldReconnectRef.current = true
+
+    if (!user) {
+      setTelemetry(null)
+      setHistory([])
+      setStatus(null)
+      setConnected(false)
+      return () => {
+        shouldReconnectRef.current = false
+      }
+    }
+
     fetchLatest()
-    fetchHistory()
     fetchStatus()
-    connectWS()
+    if (adminArea) {
+      fetchHistory()
+      connectWS()
+    }
 
     const poll = setInterval(() => {
       fetchLatest()
       fetchStatus()
-    }, TELEMETRY_POLL_MS)
+    }, adminArea ? TELEMETRY_POLL_MS : PUBLIC_POLL_MS)
 
     return () => {
       shouldReconnectRef.current = false
@@ -159,7 +163,7 @@ export function TelemetryProvider({ children }) {
         wsRef.current = null
       }
     }
-  }, [fetchLatest, fetchHistory, fetchStatus, connectWS])
+  }, [user, adminArea, fetchLatest, fetchHistory, fetchStatus, connectWS])
 
   const setTimeRange = useCallback((hours) => {
     setHistoryHours(hours)
@@ -172,6 +176,7 @@ export function TelemetryProvider({ children }) {
     historyHours,
     status,
     connected,
+    error,
     setTimeRange,
     refresh: () => {
       fetchLatest()

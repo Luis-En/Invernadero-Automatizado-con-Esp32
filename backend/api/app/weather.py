@@ -140,7 +140,9 @@ class WeatherService:
             except WeatherUnavailable as exc:
                 return self._stale_or_raise(str(exc))
             except Exception as exc:  # network error, timeout, bad JSON
-                logger.warning("OpenWeather request failed: %s", exc)
+                # Do not log the exception text: the request URL includes the
+                # OpenWeather appid and would leak the API key into logs.
+                logger.warning("OpenWeather request failed: %s", type(exc).__name__)
                 return self._stale_or_raise("No se pudo conectar con OpenWeather")
 
             self._raw = (current, forecast)

@@ -22,7 +22,6 @@ void FieldLink::begin(ConfigAppliedCallback on_config) {
 
 void FieldLink::resetConfigAssembly() {
   config_version_ = 0;
-  config_expected_crc_ = 0;
   config_total_chunks_ = 0;
   config_received_chunks_ = 0;
   config_buffer_len_ = 0;
@@ -55,7 +54,11 @@ void FieldLink::sendHello(uint32_t now_ms) {
   msg.fw_patch = FIELD_FW_VERSION_PATCH;
   msg.uptime_s = now_ms / 1000UL;
   copyDeviceId(msg.device_id, sizeof(msg.device_id));
-  sendToGateway((const uint8_t*)&msg, sizeof(msg));
+  // Hello is the discovery frame: always broadcast. A gateway that does not
+  // know this node yet needs it to learn the MAC and install the LMK; if hello
+  // went unicast-encrypted before that, the gateway could never decrypt the
+  // telemetry that follows.
+  espNow.sendBroadcast((const uint8_t*)&msg, sizeof(msg));
 }
 
 void FieldLink::sendTelemetry(const TelemetryData& telemetry) {
@@ -170,16 +173,42 @@ void FieldLink::handleFrame(const EspNowMessage& frame) {
     return;
   }
   if (header.type == MSG_COMMAND && frame.length >= sizeof(CommandMsg)) {
+    // If a fixed gateway MAC was configured, only that peer can command us.
+    if (gateway_known_ && memcmp(gateway_mac_, frame.mac, 6) != 0) {
+      const uint8_t zero[6] = {0, 0, 0, 0, 0, 0};
+      if (memcmp(gateway_mac_, zero, 6) != 0) {
+        Serial.println("[link] command from unexpected MAC, ignored");
+        return;
+      }
+    }
     // Every command we receive comes from the gateway. Remember its MAC so
     // telemetry and photo fragments can go unicast (ESP-NOW ACK + retries)
     // instead of broadcast (fire and forget).
     if (!gateway_known_ || memcmp(gateway_mac_, frame.mac, 6) != 0) {
       memcpy(gateway_mac_, frame.mac, 6);
       gateway_known_ = true;
+      espNow.preparePeer(gateway_mac_);
       Serial.printf("[link] gateway MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
                     frame.mac[0], frame.mac[1], frame.mac[2], frame.mac[3],
                     frame.mac[4], frame.mac[5]);
     }
+
+    // Reject an exact duplicate or a recent out-of-order frame. A large
+    // backwards gap is treated as a gateway reboot (its counter starts at
+    // zero); rejecting those would lock the field node after every gateway
+    // restart. Encryption (PMK/LMK) is the primary anti-replay defence.
+    const uint16_t seq = header.seq;
+    if (seq == last_command_seq_) {
+      return;
+    }
+    if (seq < last_command_seq_ && (uint16_t)(last_command_seq_ - seq) <= 32) {
+      return;
+    }
+    last_command_seq_ = seq;
+    if (seq_callback_ != nullptr) {
+      seq_callback_(seq);
+    }
+
     CommandMsg msg;
     memcpy(&msg, frame.data, sizeof(msg));
     handleCommand(msg);
@@ -210,6 +239,15 @@ void FieldLink::handleCommand(const CommandMsg& msg) {
     case CMD_PING:
       sendAck(msg.hdr.seq, CMD_PING, 0, 0);
       break;
+    case CMD_SET_ACTUATOR: {
+      const uint8_t index = (uint8_t)(msg.index & 0xFF);
+      const bool value = msg.arg != 0;
+      const bool applied = actuator_callback_ != nullptr
+                               ? actuator_callback_(index, value)
+                               : false;
+      sendAck(msg.hdr.seq, CMD_SET_ACTUATOR, (uint16_t)index, applied ? 0 : 1);
+      break;
+    }
     default:
       sendAck(msg.hdr.seq, msg.cmd, 0, 1);
       break;
@@ -219,6 +257,11 @@ void FieldLink::handleCommand(const CommandMsg& msg) {
 void FieldLink::handleConfigChunk(const CommandMsg& msg) {
   if (msg.total == 0 || msg.index >= msg.total) {
     sendAck(msg.hdr.seq, CMD_SET_CONFIG_CHUNK, msg.version, 1);
+    return;
+  }
+  if (msg.version < min_config_version_) {
+    // A rollback to an older persisted version is not a valid update.
+    sendAck(msg.hdr.seq, CMD_SET_CONFIG_CHUNK, msg.version, 4);
     return;
   }
 
@@ -256,6 +299,12 @@ void FieldLink::handleConfigCommit(const CommandMsg& msg) {
   // bits) and its version. It is only accepted once every chunk arrived.
   uint16_t expected_crc = (uint16_t)(msg.arg & 0xFFFF);
 
+  if (msg.version < min_config_version_) {
+    resetConfigAssembly();
+    sendAck(msg.hdr.seq, CMD_SET_CONFIG_COMMIT, msg.version, 4);
+    return;
+  }
+
   if (config_buffer_len_ == 0 || config_total_chunks_ == 0 ||
       config_received_chunks_ != config_total_chunks_) {
     resetConfigAssembly();
@@ -278,6 +327,8 @@ void FieldLink::handleConfigCommit(const CommandMsg& msg) {
   }
 
   config.version = msg.version;
+  // Never accept a rollback below the version we just applied.
+  min_config_version_ = msg.version;
   sendAck(msg.hdr.seq, CMD_SET_CONFIG_COMMIT, msg.version, 0);
   resetConfigAssembly();
 

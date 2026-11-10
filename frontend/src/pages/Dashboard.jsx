@@ -2,13 +2,16 @@ import { useState, useCallback, useEffect } from 'react'
 import { useTelemetry } from '../context/TelemetryContext'
 import { useAuth } from '../context/AuthContext'
 import { SensorCard, ActuatorCard } from '../components/SensorCard'
+import { AuthImage } from '../components/AuthImage'
 import { WeatherSummary } from '../components/WeatherSummary'
+import { IrrigationBanner } from '../components/IrrigationBanner'
 import { MultiChart } from '../components/Charts'
 import { api } from '../api'
 import { format } from 'date-fns'
+import { parseServerTime, formatServerTime } from '../utils/time'
 
 export function Dashboard() {
-  const { telemetry, history, status, connected, refresh, historyHours, setTimeRange } = useTelemetry()
+  const { telemetry, history, status, error: telemetryError, refresh, historyHours, setTimeRange } = useTelemetry()
   const { isAdmin } = useAuth()
   const [actuatorLoading, setActuatorLoading] = useState(null)
   const [error, setError] = useState('')
@@ -26,7 +29,9 @@ export function Dashboard() {
       }
     }
     load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [status?.last_photo])
 
   const toggleActuator = useCallback(async (actuator, newState) => {
@@ -34,7 +39,7 @@ export function Dashboard() {
     setActuatorLoading(actuator)
     setError('')
     try {
-      const ack = await api.commandActuator(actuator, newState)
+      const ack = await api.adminControlActuator(actuator, newState)
       setConfirmed(previous => ({ ...previous, [actuator]: {
         state: ack.state, confirmedAt: Date.parse(ack.confirmed_at),
       } }))
@@ -49,18 +54,19 @@ export function Dashboard() {
 
   const actuatorState = name => {
     const ack = confirmed[name]
-    const rawTimestamp = telemetry?.last_update || telemetry?.timestamp
-    const telemetryAt = rawTimestamp
-      ? Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(rawTimestamp) ? rawTimestamp : `${rawTimestamp}Z`)
-      : 0
+    const telemetryAt = parseServerTime(telemetry?.last_update || telemetry?.timestamp)?.getTime() || 0
     return ack && !(telemetryAt > ack.confirmedAt)
       ? ack.state : Boolean(telemetry?.actuators?.[name])
   }
 
+  const soilOnThreshold = status?.soil_threshold_pct ?? 35
+
   const getSoilStatus = (pct, ok) => {
-    if (!ok || pct === null) return 'offline'
-    if (pct < 30) return 'critical'
-    if (pct < 40) return 'warning'
+    if (!ok || pct === null || pct === undefined) return 'offline'
+    // Use the configured trigger instead of a hard-coded 30/40 split so the
+    // sensor colours, the banner and the push alert never disagree.
+    if (pct <= soilOnThreshold - 10) return 'critical'
+    if (pct < soilOnThreshold) return 'warning'
     return 'normal'
   }
 
@@ -78,12 +84,29 @@ export function Dashboard() {
     return 'normal'
   }
 
+  const metricTone = value =>
+    value === 'critical' ? ' critical' : value === 'warning' ? ' warning' : value === 'offline' ? ' muted' : ''
+
   if (!telemetry) {
+    if (telemetryError) {
+      return (
+        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+          <div className="alert alert-warning" role="alert" style={{ textAlign: 'left' }}>
+            {telemetryError}
+          </div>
+          <button onClick={refresh} className="btn btn-primary" type="button">
+            Reintentar
+          </button>
+        </div>
+      )
+    }
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px' }}>
-        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📡</div>
-        <p style={{ color: 'var(--color-text-muted)' }}>Cargando datos del invernadero...</p>
-        <button onClick={refresh} className="btn btn-primary" style={{ marginTop: '1rem' }}>Reintentar</button>
+      <div className="loading-state" role="status" aria-live="polite">
+        <span className="spinner" aria-hidden="true" />
+        <p>Cargando datos del invernadero…</p>
+        <button onClick={refresh} className="btn btn-primary" type="button">
+          Reintentar
+        </button>
       </div>
     )
   }
@@ -99,15 +122,16 @@ export function Dashboard() {
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p style={{ color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>
-            Última actualización: {telemetry.last_update ? format(new Date(telemetry.last_update), 'HH:mm:ss') : '—'}
+            Última actualización: {formatServerTime(telemetry.last_update, d => format(d, 'HH:mm:ss'))}
             {telemetry.sequence && <span style={{ marginLeft: '1rem', fontSize: '0.875rem' }}>Sec: {telemetry.sequence}</span>}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }} className="page-actions">
           <select
             value={historyHours}
             onChange={e => setTimeRange(Number(e.target.value))}
             className="form-control"
+            aria-label="Rango de historial"
             style={{ width: 'auto', padding: '0.375rem 2rem 0.375rem 0.75rem' }}
           >
             <option value={1}>Última hora</option>
@@ -116,23 +140,37 @@ export function Dashboard() {
             <option value={24}>Último día</option>
             <option value={168}>Última semana</option>
           </select>
-          <button onClick={refresh} className="btn btn-secondary" disabled={!connected}>
+          <button onClick={refresh} className="btn btn-secondary" type="button">
             🔄 Actualizar
           </button>
         </div>
       </div>
 
-      {error && <div className="alert alert-critical">{error}</div>}
+      <IrrigationBanner status={status} isAdmin={isAdmin} />
 
-      <div className="grid grid-4" style={{ marginBottom: '1.5rem' }}>
+      {error && (
+        <div className="alert alert-critical" role="alert">
+          {error}
+        </div>
+      )}
+      {telemetryError && (
+        <div className="alert alert-warning" role="status">
+          <span style={{ flex: 1 }}>{telemetryError}</span>
+          <button onClick={refresh} className="btn btn-secondary btn-sm">
+            Reintentar
+          </button>
+        </div>
+      )}
+
+      <div className="stat-grid" style={{ marginBottom: '1.5rem' }}>
         <div className="card">
           <div className="card-header">🌡️ Temperatura</div>
           <div className="card-body" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', fontWeight: 700, color: tempStatus === 'critical' ? 'var(--color-critical)' : tempStatus === 'warning' ? 'var(--color-warning)' : 'var(--color-text)' }}>
+            <div className={`metric-value${metricTone(tempStatus)}`}>
               {telemetry.temperature !== null ? telemetry.temperature.toFixed(1) : '—'}
-              <span style={{ fontSize: '1.5rem', fontWeight: 400, color: 'var(--color-text-muted)' }}>°C</span>
+              <span className="metric-unit">°C</span>
             </div>
-            <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+            <div className="metric-secondary">
               {telemetry.pressure !== null ? `${telemetry.pressure.toFixed(1)} hPa` : ''}
             </div>
           </div>
@@ -141,9 +179,9 @@ export function Dashboard() {
         <div className="card">
           <div className="card-header">💧 Humedad Ambiental</div>
           <div className="card-body" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', fontWeight: 700, color: humidityStatus === 'critical' ? 'var(--color-critical)' : humidityStatus === 'warning' ? 'var(--color-warning)' : 'var(--color-text)' }}>
+            <div className={`metric-value${metricTone(humidityStatus)}`}>
               {telemetry.humidity !== null ? telemetry.humidity.toFixed(1) : '—'}
-              <span style={{ fontSize: '1.5rem', fontWeight: 400, color: 'var(--color-text-muted)' }}>%</span>
+              <span className="metric-unit">%</span>
             </div>
           </div>
         </div>
@@ -151,9 +189,17 @@ export function Dashboard() {
         <div className="card">
           <div className="card-header">🌿 Suelo Fila A (prom.)</div>
           <div className="card-body" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', fontWeight: 700, color: telemetry.soil_avg_row_a !== null ? (telemetry.soil_avg_row_a < 35 ? 'var(--color-warning)' : 'var(--color-text)') : 'var(--color-text-muted)' }}>
+            <div
+              className={`metric-value${
+                telemetry.soil_avg_row_a !== null
+                  ? telemetry.soil_avg_row_a < soilOnThreshold
+                    ? ' warning'
+                    : ''
+                  : ' muted'
+              }`}
+            >
               {telemetry.soil_avg_row_a !== null ? telemetry.soil_avg_row_a.toFixed(1) : '—'}
-              <span style={{ fontSize: '1.5rem', fontWeight: 400, color: 'var(--color-text-muted)' }}>%</span>
+              <span className="metric-unit">%</span>
             </div>
           </div>
         </div>
@@ -161,9 +207,17 @@ export function Dashboard() {
         <div className="card">
           <div className="card-header">🌿 Suelo Fila B (prom.)</div>
           <div className="card-body" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', fontWeight: 700, color: telemetry.soil_avg_row_b !== null ? (telemetry.soil_avg_row_b < 35 ? 'var(--color-warning)' : 'var(--color-text)') : 'var(--color-text-muted)' }}>
+            <div
+              className={`metric-value${
+                telemetry.soil_avg_row_b !== null
+                  ? telemetry.soil_avg_row_b < soilOnThreshold
+                    ? ' warning'
+                    : ''
+                  : ' muted'
+              }`}
+            >
               {telemetry.soil_avg_row_b !== null ? telemetry.soil_avg_row_b.toFixed(1) : '—'}
-              <span style={{ fontSize: '1.5rem', fontWeight: 400, color: 'var(--color-text-muted)' }}>%</span>
+              <span className="metric-unit">%</span>
             </div>
           </div>
         </div>
@@ -230,8 +284,9 @@ export function Dashboard() {
           <div style={{ textAlign: 'center' }}>
             {latestPhoto ? (
               <>
-                <img
-                  src={`${api.getLatestPhotoFile()}?t=${encodeURIComponent(latestPhoto.timestamp)}`}
+                <AuthImage
+                  key={status?.last_photo || latestPhoto.id}
+                  latest
                   alt="Última foto del cultivo"
                   style={{
                     maxWidth: '100%',
@@ -242,7 +297,7 @@ export function Dashboard() {
                   }}
                 />
                 <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-                  Tomada: {format(new Date(latestPhoto.timestamp), 'dd/MM/yyyy HH:mm')}
+                  Tomada: {formatServerTime(latestPhoto.timestamp, d => format(d, 'dd/MM/yyyy HH:mm'))}
                 </p>
               </>
             ) : (

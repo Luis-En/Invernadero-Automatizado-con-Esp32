@@ -33,6 +33,12 @@ struct RuntimeConfig {
   uint32_t max_on_humidifier_s = 7200;
   uint32_t max_on_pump_s = 900;
 
+  // Minimum OFF time after a max-ON cut. The pump needs 300 s to let the
+  // motor and line rest; a 0 here means "no extra cooldown".
+  uint32_t min_off_fan_s = 0;
+  uint32_t min_off_humidifier_s = 0;
+  uint32_t min_off_pump_s = 300;
+
   // Parse the JSON config document. Returns false on malformed input.
   bool fromJson(const char* json, size_t length);
   bool fromJson(const String& json);

@@ -1,0 +1,36 @@
+# Run only the serial bridge on the Raspberry Pi when the API/frontend are
+# hosted remotely (Dokploy VPS + Cloudflare Tunnel).
+#
+#   API_URL=https://invernadero.example.com \
+#   DEVICE_API_TOKEN=... \
+#   docker compose -f docker-compose.remote-bridge.yml up -d --build
+#
+# The gateway is connected by USB; adjust SERIAL_DEVICE if needed.
+services:
+  serial-bridge:
+    build:
+      context: ./backend/serial_bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    devices:
+      - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./config:/app/config:ro
+      - ./backend/api/app/automation.py:/app/automation_reference.py:ro
+    environment:
+      API_URL: ${API_URL:?API_URL must point to the public HTTPS API}
+      DEVICE_API_TOKEN: ${DEVICE_API_TOKEN:?DEVICE_API_TOKEN must be set}
+      SIMULATE: "false"
+      SERIAL_PORT: /dev/ttyUSB0
+      SERIAL_BAUDRATE: "115200"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

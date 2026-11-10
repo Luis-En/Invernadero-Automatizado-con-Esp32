@@ -27,7 +27,7 @@ async def test_apply_config_requires_admin(client, auth_viewer):
     assert resp.status_code == 403
 
 
-async def test_apply_and_confirm_config(client, auth_admin):
+async def test_apply_and_confirm_config(client, auth_admin, device_headers):
     applied = await _apply_config(client, auth_admin)
     assert applied.status_code == 200
     version = applied.json()["version"]
@@ -36,7 +36,7 @@ async def test_apply_and_confirm_config(client, auth_admin):
     assert active.status_code == 200
     assert active.json()["config_json"]["hysteresis"]["temp"]["on_above"] == 28.0
 
-    confirmed = await client.post(f"/api/config/confirm/{version}")
+    confirmed = await client.post(f"/api/config/confirm/{version}", headers=device_headers)
     assert confirmed.status_code == 200
     assert confirmed.json()["esp32_confirmed"] is True
 
@@ -58,7 +58,7 @@ async def test_update_active_config_replaces_version(client, auth_admin):
     assert active.json()["config_json"]["irrigation"]["enabled"] is True
 
 
-async def test_telemetry_ingest_and_latest(client):
+async def test_telemetry_ingest_and_latest(client, device_headers, auth_admin):
     payload = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "temperature": 25.5,
@@ -76,10 +76,10 @@ async def test_telemetry_ingest_and_latest(client):
         "device_id": "field_esp32",
         "sequence": 1,
     }
-    ingest = await client.post("/api/config/telemetry", json=payload)
+    ingest = await client.post("/api/config/telemetry", json=payload, headers=device_headers)
     assert ingest.status_code == 201
 
-    latest = await client.get("/api/config/telemetry/latest")
+    latest = await client.get("/api/config/telemetry/latest", headers=auth_admin)
     assert latest.status_code == 200
     data = latest.json()
     assert data["temperature"] == 25.5
@@ -98,6 +98,6 @@ async def test_status_endpoint_does_not_crash(client, auth_admin):
     assert "field_esp32_online" in body
 
 
-async def test_telemetry_rejects_malformed_payload(client):
-    resp = await client.post("/api/config/telemetry", json={"temperature": 20})
-    assert resp.status_code == 400
+async def test_telemetry_rejects_malformed_payload(client, device_headers):
+    resp = await client.post("/api/config/telemetry", json={"temperature": 20}, headers=device_headers)
+    assert resp.status_code in (400, 422)

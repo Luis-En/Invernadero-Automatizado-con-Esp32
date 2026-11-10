@@ -1,21 +1,26 @@
 ### Greenhouse API - REST Client examples
 ### Use the VS Code "REST Client" extension and click "Send Request".
-### Login first, then copy the access_token into @token below.
+### The browser uses an HttpOnly cookie; for curl/REST Client copy the
+### access_token into @token below (Bearer remains supported).
 
 @host = http://localhost:8000
 @token = PASTE_TOKEN_HERE
+@device_token = PASTE_DEVICE_TOKEN_HERE
 
 ### Health
 GET {{host}}/health
 
-### Login (admin)
+### Login (admin; also sets the HttpOnly session cookie)
 POST {{host}}/api/auth/login
 Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "admin123"
+  "password": "TU_ADMIN_PASSWORD"
 }
+
+### Logout (clears the session cookie)
+POST {{host}}/api/auth/logout
 
 ### Current user
 GET {{host}}/api/auth/me
@@ -56,7 +61,7 @@ Content-Type: application/json
       "soil": { "on_below_pct": 35, "off_above_pct": 45 }
     },
     "irrigation": { "enabled": false },
-    "safety": { "max_on_seconds": { "fan": 7200, "humidifier": 7200, "pump": 900 } }
+    "safety": { "max_on_seconds": { "fan": 7200, "humidifier": 7200, "pump": 900 }, "min_off_seconds": { "fan": 0, "humidifier": 0, "pump": 300 } }
   }
 }
 
@@ -71,6 +76,94 @@ Authorization: Bearer {{token}}
 ### Weather: current + rain forecast (needs OPENWEATHER_API_KEY in .env)
 GET {{host}}/api/weather/overview?hours=48
 Authorization: Bearer {{token}}
+
+### Notifications: server config + VAPID public key
+GET {{host}}/api/notifications/config
+Authorization: Bearer {{token}}
+
+### Notifications: register a browser push subscription
+POST {{host}}/api/notifications/subscribe
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/REPLACE_ME",
+  "keys": {
+    "p256dh": "REPLACE_WITH_BASE64URL_KEY",
+    "auth": "REPLACE_WITH_BASE64URL_SECRET"
+  },
+  "user_agent": "Pixel 8 / Chrome"
+}
+
+### Notifications: send a test push to the current user
+POST {{host}}/api/notifications/test
+Authorization: Bearer {{token}}
+
+### Notifications: remove a subscription
+DELETE {{host}}/api/notifications/subscribe
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/REPLACE_ME"
+}
+
+### Public: telemetry without auth
+GET {{host}}/api/public/telemetry
+
+### Public: history, photos, weather, crops
+GET {{host}}/api/public/telemetry/history?hours=24
+GET {{host}}/api/public/photos?limit=30
+GET {{host}}/api/public/weather?hours=48
+GET {{host}}/api/public/crops
+
+### Admin: control an actuator
+POST {{host}}/api/admin/actuators/control
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "actuator": "fan_1",
+  "state": true
+}
+
+### Admin: apply configuration
+POST {{host}}/api/admin/config
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "config_json": {
+    "hysteresis": {
+      "temp": {"on_above": 30, "off_below": 27.5},
+      "humidity": {"on_below": 60, "off_above": 68},
+      "soil": {"on_below_pct": 35, "off_above_pct": 45}
+    },
+    "irrigation": {"enabled": false},
+    "safety": {"max_on_seconds": {"pump": 900}}
+  },
+  "crop_id": null
+}
+
+### Admin: audit log
+GET {{host}}/api/admin/logs?action=actuator.control&limit=50
+Authorization: Bearer {{token}}
+
+### Admin: detailed health
+GET {{host}}/api/admin/health
+Authorization: Bearer {{token}}
+
+### Admin: create a user
+POST {{host}}/api/admin/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "username": "operador",
+  "email": "operador@local",
+  "password": "OperadorSeguro123!",
+  "role": "viewer"
+}
 
 ### Device-facing telemetry ingest (as the gateway would send it)
 POST {{host}}/api/config/telemetry

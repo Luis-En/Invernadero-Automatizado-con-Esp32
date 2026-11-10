@@ -64,11 +64,31 @@ static bool decideHigh(bool current, float value, float on, float off) {
   return current;
 }
 
-static bool exceedsLimit(bool state, uint32_t on_since_ms, uint32_t limit_s, uint32_t now_ms) {
-  if (!state || limit_s == 0) {
+static bool applySafetyLimit(uint8_t index, bool desired, bool was_on,
+                             ActuatorState& state, uint32_t limit_s,
+                             uint32_t min_off_s, uint32_t now_ms) {
+  if (state.limit_blocked[index]) {
+    if (!desired) {
+      state.limit_recovered[index] = true;
+    }
+    const uint32_t off_at = state.off_since_ms[index];
+    const bool cooldown_done =
+        off_at != 0 && (now_ms - off_at) >= (min_off_s * 1000UL);
+    if (state.limit_recovered[index] && cooldown_done) {
+      state.limit_blocked[index] = false;
+      state.limit_recovered[index] = false;
+    } else {
+      return false;
+    }
+  }
+
+  if (desired && was_on && limit_s > 0 &&
+      (now_ms - state.on_since_ms[index]) >= (limit_s * 1000UL)) {
+    state.limit_blocked[index] = true;
+    state.limit_recovered[index] = false;
     return false;
   }
-  return (now_ms - on_since_ms) >= (limit_s * 1000UL);
+  return desired;
 }
 
 void computeActuatorStates(const RuntimeConfig& config,
@@ -108,22 +128,21 @@ void computeActuatorStates(const RuntimeConfig& config,
     state.pump = decideLow(state.pump, sensors.soil_average, config.soil.on, config.soil.off);
   }
 
-  // --- Hard maximum ON time ------------------------------------------------
-  if (exceedsLimit(state.fan_1, state.on_since_ms[ACT_FAN_1], config.max_on_fan_s, now_ms)) {
-    state.fan_1 = false;
-  }
-  if (exceedsLimit(state.fan_2, state.on_since_ms[ACT_FAN_2], config.max_on_fan_s, now_ms)) {
-    state.fan_2 = false;
-  }
-  if (exceedsLimit(state.humidifier_1, state.on_since_ms[ACT_HUMIDIFIER_1], config.max_on_humidifier_s, now_ms)) {
-    state.humidifier_1 = false;
-  }
-  if (exceedsLimit(state.humidifier_2, state.on_since_ms[ACT_HUMIDIFIER_2], config.max_on_humidifier_s, now_ms)) {
-    state.humidifier_2 = false;
-  }
-  if (exceedsLimit(state.pump, state.on_since_ms[ACT_PUMP], config.max_on_pump_s, now_ms)) {
-    state.pump = false;
-  }
+  // --- Hard maximum ON time + OFF cooldown --------------------------------
+  state.fan_1 = applySafetyLimit(ACT_FAN_1, state.fan_1, prev[ACT_FAN_1], state,
+                                 config.max_on_fan_s, config.min_off_fan_s, now_ms);
+  state.fan_2 = applySafetyLimit(ACT_FAN_2, state.fan_2, prev[ACT_FAN_2], state,
+                                 config.max_on_fan_s, config.min_off_fan_s, now_ms);
+  state.humidifier_1 = applySafetyLimit(ACT_HUMIDIFIER_1, state.humidifier_1,
+                                       prev[ACT_HUMIDIFIER_1], state,
+                                       config.max_on_humidifier_s,
+                                       config.min_off_humidifier_s, now_ms);
+  state.humidifier_2 = applySafetyLimit(ACT_HUMIDIFIER_2, state.humidifier_2,
+                                       prev[ACT_HUMIDIFIER_2], state,
+                                       config.max_on_humidifier_s,
+                                       config.min_off_humidifier_s, now_ms);
+  state.pump = applySafetyLimit(ACT_PUMP, state.pump, prev[ACT_PUMP], state,
+                                config.max_on_pump_s, config.min_off_pump_s, now_ms);
 
   // --- Manual override (admin) --------------------------------------------
   if (manual_override_active) {
@@ -132,12 +151,16 @@ void computeActuatorStates(const RuntimeConfig& config,
     }
   }
 
-  // --- Update the continuous-ON timers ------------------------------------
+  // --- Update the continuous ON/OFF timers --------------------------------
   for (uint8_t i = 0; i < ACT_COUNT; i++) {
     bool now_on = state.get(i);
     if (now_on && !prev[i]) {
       state.on_since_ms[i] = now_ms;
+      state.off_since_ms[i] = 0;
     } else if (!now_on) {
+      if (prev[i] && state.off_since_ms[i] == 0) {
+        state.off_since_ms[i] = now_ms;
+      }
       state.on_since_ms[i] = 0;
     }
   }

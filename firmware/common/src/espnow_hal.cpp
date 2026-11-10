@@ -97,6 +97,23 @@ bool EspNowHal::begin(uint8_t channel, uint8_t mode_hint) {
   return true;
 }
 
+bool EspNowHal::setSecurity(const uint8_t pmk[16], const uint8_t lmk[16]) {
+  if (pmk == nullptr || lmk == nullptr) {
+    return false;
+  }
+  memcpy(lmk_, lmk, sizeof(lmk_));
+  secure_ = true;
+#if defined(ESP8266)
+  // The ESP8266 core has no portable PMK/LMK API here. Keep the flag off so
+  // the caller does not believe traffic is encrypted.
+  secure_ = false;
+  (void)pmk;
+  return false;
+#else
+  return esp_now_set_pmk(pmk) == ESP_OK;
+#endif
+}
+
 bool EspNowHal::addPeer(const uint8_t* mac) {
 #if defined(ESP8266)
   if (esp_now_is_peer_exist((uint8_t*)mac)) {
@@ -111,7 +128,14 @@ bool EspNowHal::addPeer(const uint8_t* mac) {
   memset(&peer, 0, sizeof(peer));
   memcpy(peer.peer_addr, mac, 6);
   peer.channel = 0;
-  peer.encrypt = false;
+  // Broadcast is never encrypted; unicast peers get the link key.
+  const bool is_broadcast =
+      mac[0] == 0xFF && mac[1] == 0xFF && mac[2] == 0xFF &&
+      mac[3] == 0xFF && mac[4] == 0xFF && mac[5] == 0xFF;
+  peer.encrypt = secure_ && !is_broadcast;
+  if (peer.encrypt) {
+    memcpy(peer.lmk, lmk_, sizeof(peer.lmk));
+  }
   peer.ifidx = WIFI_IF_STA;
   return esp_now_add_peer(&peer) == ESP_OK;
 #endif

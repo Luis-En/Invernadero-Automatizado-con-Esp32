@@ -1,5 +1,11 @@
 #pragma once
 
+// Same PMK/LMK as the field node. Copy espnow_secrets.example.h to
+// include/espnow_secrets.h on both builds.
+#if __has_include("espnow_secrets.h")
+#include "espnow_secrets.h"
+#endif
+
 #define GW_FW_VERSION_MAJOR 1
 #define GW_FW_VERSION_MINOR 0
 #define GW_FW_VERSION_PATCH 0
@@ -23,8 +29,6 @@
 // Must match the field node's AP/ESP-NOW channel (firmware/field config.h,
 // FIELD_ESPNOW_CHANNEL).
 #define GW_WIFI_CHANNEL 6
-
-#define GW_ESPNOW_QUEUE_LENGTH 16
 
 #ifndef GW_SIMULATE
 #define GW_SIMULATE 0

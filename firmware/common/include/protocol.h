@@ -46,6 +46,9 @@ enum CommandCode : uint8_t {
   CMD_REBOOT = 4,
   CMD_PURGE = 5,
   CMD_PING = 6,
+  // Direct actuator command from the gateway (originated by the Pi over serial). The
+  // payload is in the CommandMsg fields: index = ActuatorIndex, arg = 0/1.
+  CMD_SET_ACTUATOR = 7,
 };
 
 enum ActuatorIndex : uint8_t {

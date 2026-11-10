@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Invernadero">
+  <defs>
+    <linearGradient id="bgm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d6a4f"/>
+      <stop offset="1" stop-color="#1b4332"/>
+    </linearGradient>
+    <linearGradient id="dropm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a7f3d0"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bgm)"/>
+  <g transform="translate(256 256) scale(0.62) translate(-256 -256)">
+    <path d="M256 402V236" fill="none" stroke="#f0fdf4" stroke-width="26" stroke-linecap="round"/>
+    <path d="M256 292c-72 0-116-44-122-112 70-4 122 38 122 112z" fill="#f0fdf4"/>
+    <path d="M256 250c62 0 100-38 106-96-61-3-106 33-106 96z" fill="#d1fae5"/>
+    <path d="M256 430c0 0-38-34-38-58a38 38 0 0 1 76 0c0 24-38 58-38 58z" fill="url(#dropm)"/>
+  </g>
+</svg>

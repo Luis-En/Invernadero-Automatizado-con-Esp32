@@ -1,0 +1,30 @@
+# Production override.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up --build -d
+#
+# TLS terminates in the tunnel/reverse proxy (Tailscale Serve, Caddy, Dokploy,
+# Cloudflare). That proxy must send X-Forwarded-Proto: https. Both app ports are
+# bound to loopback; only the proxy should reach them.
+services:
+  api:
+    environment:
+      ENVIRONMENT: production
+      AUTH_COOKIE_SECURE: "true"
+      REQUIRE_HTTPS: "true"
+      ENABLE_DOCS: "false"
+      RATE_LIMIT_ENABLED: "true"
+      AUDIT_LOG_ENABLED: "true"
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    volumes:
+      - ./frontend/nginx.production.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./data/logs/nginx:/var/log/nginx
+    ports: !override
+      - "127.0.0.1:5173:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
