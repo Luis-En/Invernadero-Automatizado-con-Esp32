@@ -27,7 +27,6 @@ class Simulator {
 
   float temperature_ = 26.5f;
   float humidity_ = 72.0f;
-  float pressure_ = 1013.2f;
   float soil_[SOIL_SENSOR_COUNT] = {45.0f, 42.0f, 48.0f, 40.0f, 44.0f, 38.0f};
   bool fan_on_ = false;
   bool humidifier_on_ = false;

@@ -110,9 +110,9 @@ Severidad: **Crítica** impide el uso; **Alta** degrada tareas principales;
 ## Verificación realizada
 
 - `npm run lint` → sin errores.
-- `npm test` → 16 pruebas (5 archivos).
+- `npm test` → 20 pruebas (6 archivos).
 - `npm run build` → correcto; rutas divididas en chunks.
-- `pytest` en el contenedor → **126 pruebas** (se omite únicamente
+- `pytest` en el contenedor → **129 pruebas** (se omite únicamente
   `test_serial_contract.py`, que espera un montaje `/app/serial_bridge` no
   presente en este contenedor; es una limitación del entorno, no del cambio).
 - API real: `/api/notifications/config` devuelve la clave pública VAPID;

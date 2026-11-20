@@ -254,17 +254,16 @@ def compute_actuator_states(
         )
         states["fan_1"] = states["fan_2"] = fan
 
-    # --- Humidifiers (ambient humidity driven) ------------------------------
+    # --- Humidifier (ambient humidity driven) -------------------------------
     if not valid_humidity(humidity):
-        states["humidifier_1"] = states["humidifier_2"] = False
+        states["humidifier_1"] = False
     else:
-        hum = _hysteresis_decision(
+        states["humidifier_1"] = _hysteresis_decision(
             states.get("humidifier_1", False),
             humidity,
             on_below=hum_hyst.get("on_below", 60.0),
             off_above=hum_hyst.get("off_above", 68.0),
         )
-        states["humidifier_1"] = states["humidifier_2"] = hum
 
     # --- Pump (soil moisture driven) ----------------------------------------
     if not irrigation_enabled or not valid_soil(soil_average):
@@ -282,10 +281,10 @@ def compute_actuator_states(
         states[name] = _apply_safety_limit(
             name, states[name], runtime, now, max_on["fan"], min_off["fan"]
         )
-    for name in ("humidifier_1", "humidifier_2"):
-        states[name] = _apply_safety_limit(
-            name, states[name], runtime, now, max_on["humidifier"], min_off["humidifier"]
-        )
+    states["humidifier_1"] = _apply_safety_limit(
+        "humidifier_1", states["humidifier_1"], runtime, now,
+        max_on["humidifier"], min_off["humidifier"]
+    )
     states["pump"] = _apply_safety_limit(
         "pump", states["pump"], runtime, now, max_on["pump"], min_off["pump"]
     )

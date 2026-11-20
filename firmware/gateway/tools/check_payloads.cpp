@@ -16,7 +16,6 @@ int main() {
   memset(&telemetry, 0, sizeof(telemetry));
   telemetry.temperature = 26.53f;
   telemetry.humidity = 72.04f;
-  telemetry.pressure = 1013.2f;
 
   const uint16_t adc[SOIL_SENSOR_COUNT] = {2252, 2374, 2129, 2457, 2293, 2539};
   const float pct[SOIL_SENSOR_COUNT] = {45.0f, 42.0f, 48.0f, 40.0f, 44.0f, 38.0f};

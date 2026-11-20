@@ -2,19 +2,18 @@
 
 // Field node configuration: identity, pin map and timing. Pin map mirrors
 // config/actuators.yaml on the Raspberry Pi side:
-//   fan_1 GPIO16, fan_2 GPIO17, humidifier_1 GPIO18, humidifier_2 GPIO19,
-//   pump GPIO21.
+//   fan_1 GPIO16, fan_2 GPIO17, humidifier_1 GPIO18, pump GPIO21.
 //
 // Soil sensors MUST use ADC1 pins (GPIO32-39) on the ESP32: ADC2 is shared
 // with the Wi-Fi/ESP-NOW radio and returns garbage while the radio is up.
 
 #define FIELD_FW_VERSION_MAJOR 1
-#define FIELD_FW_VERSION_MINOR 1
+#define FIELD_FW_VERSION_MINOR 2
 #define FIELD_FW_VERSION_PATCH 0
-#define FIELD_FW_VERSION "1.1.0"
+#define FIELD_FW_VERSION "1.2.0"
 
 // Selects which of the two field nodes this build is. The primary owns the
-// BME280, the actuators and the camera AP; the secondary only reads the extra
+// DHT11, the actuators and the camera AP; the secondary only reads the extra
 // soil probes and forwards them over ESP-NOW.
 #ifndef FIELD_ROLE_SECONDARY
 #define FIELD_ROLE_SECONDARY 0
@@ -22,12 +21,12 @@
 
 #if FIELD_ROLE_SECONDARY
 #define FIELD_DEVICE_ID "field_secondary"
-#define FIELD_HAS_BME280 0
+#define FIELD_HAS_DHT 0
 #define FIELD_HAS_ACTUATORS 0
 #define FIELD_HAS_CAMERA_AP 0
 #else
 #define FIELD_DEVICE_ID "field_primary"
-#define FIELD_HAS_BME280 1
+#define FIELD_HAS_DHT 1
 #define FIELD_HAS_ACTUATORS 1
 #define FIELD_HAS_CAMERA_AP 1
 #endif
@@ -84,15 +83,13 @@
 #define SOIL_CAL_WET_DEFAULT 1600
 
 // ---------------------------------------------------------------------------
-// BME280 (primary only). SCL -> GPIO32, SDA -> GPIO33. The 6-pin module's
-// CSB/SDO are assumed strapped on the board (CSB high = I2C, SDO low = 0x76);
-// set the macros below to a GPIO if your breakout needs them driven.
+// DHT11 (primary only): GND, VCC (3.3 V) and a single DATA line on GPIO32.
+// There is no I2C bus; the library handles the proprietary one-wire protocol.
+// Use a 10k pull-up from DATA to 3.3 V if the breakout does not include one,
+// and keep the cable short (< 1 m).
 // ---------------------------------------------------------------------------
-#define FIELD_I2C_SDA 33
-#define FIELD_I2C_SCL 32
-#define FIELD_BME280_CSB_PIN -1
-#define FIELD_BME280_SDO_PIN -1
-#define FIELD_BME280_ADDR 0x76
+#define FIELD_DHT_PIN 32
+#define FIELD_DHT_TYPE DHT11
 
 // ---------------------------------------------------------------------------
 // Actuators (primary only). active_high matches config/actuators.yaml.
@@ -100,7 +97,6 @@
 #define ACT_PIN_FAN_1 16
 #define ACT_PIN_FAN_2 17
 #define ACT_PIN_HUMIDIFIER_1 18
-#define ACT_PIN_HUMIDIFIER_2 19
 #define ACT_PIN_PUMP 21
 
 #define ACT_FAN_ACTIVE_HIGH 1
@@ -155,13 +151,13 @@
 // them; pacing to one chunk every window/total ms keeps the radio healthy.
 #define FIELD_PHOTO_SEND_WINDOW_MS 120000UL
 
-// Optional bench build: fake sensors, no BME280 required.
+// Optional bench build: fake sensors, no DHT11 required.
 #ifndef FIELD_BENCH
 #define FIELD_BENCH 0
 #endif
 
-#ifndef FIELD_NO_BME280
-#define FIELD_NO_BME280 (!FIELD_HAS_BME280)
+#ifndef FIELD_NO_DHT
+#define FIELD_NO_DHT (!FIELD_HAS_DHT)
 #endif
 
 // Calibration-only build: skip Wi-Fi/ESP-NOW entirely so a node on a weak USB

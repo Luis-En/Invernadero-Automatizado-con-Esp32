@@ -19,7 +19,6 @@ void decodeTelemetry(const TelemetryMsg& msg, int8_t linkRssi, TelemetryData& ou
   out.epoch = msg.epoch;
   out.temperature = msg.temperature_c_x100 / 100.0f;
   out.humidity = msg.humidity_pct_x100 / 100.0f;
-  out.pressure = (float)msg.pressure_hpa;
 
   for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
     out.soil[i].adc = msg.soil_adc[i];

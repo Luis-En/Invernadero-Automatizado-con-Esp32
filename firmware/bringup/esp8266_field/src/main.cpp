@@ -95,9 +95,8 @@ void sendTelemetry() {
   memcpy(msg.hdr.src, espNow.ownMac(), 6);
   msg.hdr.seq = espNow.nextSeq();
   msg.epoch = 0;
-  msg.temperature_c_x100 = 0;  // no BME280 on this board
+  msg.temperature_c_x100 = 0;  // no DHT11 on this board
   msg.humidity_pct_x100 = 0;
-  msg.pressure_hpa = 0;
   msg.soil_adc[0] = last_raw;
   msg.soil_pct[0] = last_pct;
   msg.soil_ok_mask = 0x01;  // only sensor A1 valid

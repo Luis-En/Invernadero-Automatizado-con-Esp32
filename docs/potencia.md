@@ -19,11 +19,11 @@ El GPIO del ESP32 **no** debe alimentar la bobina: usa un optoacoplador o un
 módulo de relé con transistor y diodo flyback. El relé de 10 A de la maqueta
 queda solo para pruebas con lámpara, nunca con el motor.
 
-## Ventiladores y humidificadores
+## Ventiladores y humidificador
 
 - Ventiladores 110 VAC: contactor/SSR de 10–20 A por canal, breaker compartido
   de 15 A si la suma lo permite.
-- Humidificadores 24 VDC 800 mA: MOSFET de canal N con diodo flyback y fuente
+- Humidificador 24 VDC 800 mA: MOSFET de canal N con diodo flyback y fuente
   de 24 V / 3 A; no usar el regulador del ESP32.
 - Fuente 5 V / 3 A separada para el ESP32; tierra común solo en un punto.
 
@@ -48,7 +48,7 @@ protección eléctrica.
 - [ ] Varistor 275 V + fusible en la entrada de 110 VAC.
 - [ ] Pull-down de 10 kΩ en cada GPIO que excita un relé/opto.
 - [ ] Bobina del contactor alimentada por fuente/opto, nunca directo del ESP32.
-- [ ] Fuente 24 VDC 3 A para humidificadores y 5 VDC 3 A para el ESP32.
+- [ ] Fuente 24 VDC 3 A para el humidificador y 5 VDC 3 A para el ESP32.
 - [ ] Tierra única: gabinete, motor, fuente y ESP32 al mismo punto.
 - [ ] Prueba con lámpara incandescente en cada canal antes de conectar la bomba.
 - [ ] Medición de inrush de la bomba y ajuste del breaker.

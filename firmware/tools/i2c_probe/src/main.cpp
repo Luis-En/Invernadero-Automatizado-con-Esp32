@@ -4,6 +4,9 @@
 // Definitive single-bus probe. Reports the idle line levels (to tell whether
 // the module provides pull-ups), then scans the BME280 addresses at both a slow
 // and the default clock with the internal pull-ups enabled.
+//
+// Legacy: the field node no longer uses a BME280 (it reads a DHT11 on GPIO32).
+// Keep this tool only to diagnose an older board that still has the I2C sensor.
 
 #ifndef I2C_PROBE_SDA
 #define I2C_PROBE_SDA 2

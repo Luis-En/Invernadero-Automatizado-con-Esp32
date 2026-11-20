@@ -68,7 +68,6 @@ class Telemetry:
     timestamp: str
     temperature: float
     humidity: float
-    pressure: float
     soil_sensors: list
     actuators: dict
     rssi: int
@@ -85,7 +84,6 @@ class Simulator:
             "fan_1": False,
             "fan_2": False,
             "humidifier_1": False,
-            "humidifier_2": False,
             "pump": False,
         }
         self.config = self._default_config()
@@ -98,7 +96,6 @@ class Simulator:
         self.photo_sequence = 0
         self.base_temp = 26.5
         self.base_humidity = 72.0
-        self.base_pressure = 1013.25
         self.soil_base = [45, 42, 48, 40, 44, 38]
         self.actuator_runtime = control.ActuatorRuntime()
         self.sensor_monitor = control.SensorMonitor()
@@ -131,7 +128,6 @@ class Simulator:
 
         self.base_temp = max(18, min(35, self.base_temp + random.uniform(-0.3, 0.3)))
         self.base_humidity = max(40, min(95, self.base_humidity + random.uniform(-1.5, 1.5)))
-        self.base_pressure = max(990, min(1030, self.base_pressure + random.uniform(-0.5, 0.5)))
 
         soil_sensors = []
         for base in self.soil_base:
@@ -148,7 +144,6 @@ class Simulator:
             timestamp=datetime.utcnow().isoformat() + "Z",
             temperature=round(self.base_temp, 1),
             humidity=round(self.base_humidity, 1),
-            pressure=round(self.base_pressure, 1),
             soil_sensors=[asdict(s) for s in soil_sensors],
             actuators=self.actuators.copy(),
             rssi=-random.randint(40, 85),

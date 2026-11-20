@@ -40,10 +40,10 @@ volatile uint32_t g_loop_heartbeat = 0;
 #endif
 
 bool manual_override_active = false;
-bool manual_values[ACT_COUNT] = {false, false, false, false, false};
+bool manual_values[ACT_COUNT] = {false, false, false, false};
 
 // Last valid actuator mask, used by telemetry.
-bool last_outputs[ACT_COUNT] = {false, false, false, false, false};
+bool last_outputs[ACT_COUNT] = {false, false, false, false};
 
 void applyNewConfig(const RuntimeConfig& config) {
   runtime_config = config;
@@ -143,7 +143,6 @@ TelemetryData buildTelemetry(uint32_t now_ms) {
   telemetry.epoch = fieldLink.epochNow();
   telemetry.temperature = latest_snapshot.temperature;
   telemetry.humidity = latest_snapshot.humidity;
-  telemetry.pressure = latest_snapshot.pressure;
   for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
     telemetry.soil[i] = {latest_snapshot.soil[i].adc,
                          latest_snapshot.soil[i].pct,
@@ -174,13 +173,12 @@ void printStatus(const SensorSnapshot& snapshot, const bool outputs[ACT_COUNT]) 
                           kSoilLabels[i]);
     }
   }
-  Serial.printf("[field] T=%.1fC H=%.1f%% P=%.1fhPa | %s| avg=%.1f%%\n",
-                snapshot.temperature, snapshot.humidity, snapshot.pressure, soil,
+  Serial.printf("[field] T=%.1fC H=%.1f%% | %s| avg=%.1f%%\n",
+                snapshot.temperature, snapshot.humidity, soil,
                 snapshot.soil_average);
-  Serial.printf("[field] out fan1=%d fan2=%d hum1=%d hum2=%d pump=%d%s\n",
+  Serial.printf("[field] out fan1=%d fan2=%d hum1=%d pump=%d%s\n",
                 outputs[ACT_FAN_1], outputs[ACT_FAN_2], outputs[ACT_HUMIDIFIER_1],
-                outputs[ACT_HUMIDIFIER_2], outputs[ACT_PUMP],
-                manual_override_active ? " (manual)" : "");
+                outputs[ACT_PUMP], manual_override_active ? " (manual)" : "");
 }
 
 // -----------------------------------------------------------------------------
@@ -266,7 +264,7 @@ void pollCalibrationCommands() {
 #if defined(ESP32) && !FIELD_CALIBRATION_ONLY
 // Application watchdog: if loop() stops advancing, force every output OFF
 // from a separate task instead of waiting for the chip to reset. This covers
-// a blocked I2C bus, an infinite loop or a stuck network stack.
+// a blocked loop, an infinite loop or a stuck network stack.
 void fieldWatchdogTask(void*) {
   uint32_t last = 0;
   while (true) {

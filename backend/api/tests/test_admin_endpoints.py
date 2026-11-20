@@ -41,7 +41,30 @@ async def test_viewer_cannot_use_admin_endpoints(client, auth_viewer):
         assert resp.status_code == 403, (path, resp.status_code)
 
 
-async def test_admin_can_control_actuator(client, auth_admin, monkeypatch):
+async def test_admin_can_control_actuator(client, auth_admin, device_headers, monkeypatch):
+    from datetime import datetime
+
+    telemetry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "temperature": 24.0,
+        "humidity": 70.0,
+        "soil_adc": [2000] * 6,
+        "soil_pct": [42.0] * 6,
+        "soil_ok": [True] * 6,
+        "fan_1_state": False,
+        "fan_2_state": False,
+        "humidifier_1_state": False,
+        "pump_state": False,
+        "rssi": -60,
+        "device_id": "field_esp32",
+        "sequence": 10,
+    }
+    assert (
+        await client.post(
+            "/api/config/telemetry", json=telemetry, headers=device_headers
+        )
+    ).status_code == 201
+
     monkeypatch.setattr(
         "app.routes.actuators.send_command",
         lambda actuator, state: {"actuator": actuator, "state": state, "queued": True},
@@ -53,6 +76,10 @@ async def test_admin_can_control_actuator(client, auth_admin, monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["state"] is True
+
+    latest = await client.get("/api/config/telemetry/latest", headers=auth_admin)
+    assert latest.status_code == 200
+    assert latest.json()["actuators"]["fan_1"] is True
 
 
 async def test_admin_can_apply_config(client, auth_admin):

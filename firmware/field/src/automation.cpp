@@ -19,7 +19,6 @@ bool ActuatorState::get(uint8_t index) const {
     case ACT_FAN_1: return fan_1;
     case ACT_FAN_2: return fan_2;
     case ACT_HUMIDIFIER_1: return humidifier_1;
-    case ACT_HUMIDIFIER_2: return humidifier_2;
     case ACT_PUMP: return pump;
     default: return false;
   }
@@ -30,7 +29,6 @@ void ActuatorState::set(uint8_t index, bool value) {
     case ACT_FAN_1: fan_1 = value; break;
     case ACT_FAN_2: fan_2 = value; break;
     case ACT_HUMIDIFIER_1: humidifier_1 = value; break;
-    case ACT_HUMIDIFIER_2: humidifier_2 = value; break;
     case ACT_PUMP: pump = value; break;
     default: break;
   }
@@ -99,7 +97,7 @@ void computeActuatorStates(const RuntimeConfig& config,
                            const bool manual_values[ACT_COUNT]) {
   // Remember previous states to detect transitions for the ON-timer.
   const bool prev[ACT_COUNT] = {
-      state.fan_1, state.fan_2, state.humidifier_1, state.humidifier_2, state.pump};
+      state.fan_1, state.fan_2, state.humidifier_1, state.pump};
 
   // --- Ventilation (temperature driven) ------------------------------------
   bool fan;
@@ -111,15 +109,13 @@ void computeActuatorStates(const RuntimeConfig& config,
   state.fan_1 = fan;
   state.fan_2 = fan;
 
-  // --- Humidifiers (ambient humidity driven) ------------------------------
-  bool humidifier;
+  // --- Humidifier (ambient humidity driven) -------------------------------
   if (!validHumidity(sensors.humidity)) {
-    humidifier = false;
+    state.humidifier_1 = false;
   } else {
-    humidifier = decideLow(state.humidifier_1, sensors.humidity, config.humidity.on, config.humidity.off);
+    state.humidifier_1 = decideLow(state.humidifier_1, sensors.humidity,
+                                   config.humidity.on, config.humidity.off);
   }
-  state.humidifier_1 = humidifier;
-  state.humidifier_2 = humidifier;
 
   // --- Pump (soil moisture driven) ----------------------------------------
   if (!config.irrigation_enabled || !validSoil(sensors.soil_average)) {
@@ -135,10 +131,6 @@ void computeActuatorStates(const RuntimeConfig& config,
                                  config.max_on_fan_s, config.min_off_fan_s, now_ms);
   state.humidifier_1 = applySafetyLimit(ACT_HUMIDIFIER_1, state.humidifier_1,
                                        prev[ACT_HUMIDIFIER_1], state,
-                                       config.max_on_humidifier_s,
-                                       config.min_off_humidifier_s, now_ms);
-  state.humidifier_2 = applySafetyLimit(ACT_HUMIDIFIER_2, state.humidifier_2,
-                                       prev[ACT_HUMIDIFIER_2], state,
                                        config.max_on_humidifier_s,
                                        config.min_off_humidifier_s, now_ms);
   state.pump = applySafetyLimit(ACT_PUMP, state.pump, prev[ACT_PUMP], state,

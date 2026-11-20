@@ -31,7 +31,7 @@ struct SerialActuatorPending {
 SerialActuatorPending serial_actuator;
 
 const char* const kActuatorNames[ACT_COUNT] = {
-    "fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"};
+    "fan_1", "fan_2", "humidifier_1", "pump"};
 
 int8_t actuatorIndex(const char* name) {
   for (uint8_t i = 0; i < ACT_COUNT; i++) {

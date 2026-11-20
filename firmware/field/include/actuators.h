@@ -5,7 +5,7 @@
 #include "automation.h"
 #include "config.h"
 
-// Drives the five output pins. The pins are active-high relay inputs behind an
+// Drives the four output pins. The pins are active-high relay inputs behind an
 // optocoupler/SSR as documented in config/actuators.yaml. On boot every pin is
 // forced to its safe OFF level before anything else runs.
 class ActuatorManager {
@@ -18,7 +18,7 @@ class ActuatorManager {
 
  private:
   void writePin(uint8_t index, bool on);
-  bool output_state_[ACT_COUNT] = {false, false, false, false, false};
+  bool output_state_[ACT_COUNT] = {false, false, false, false};
 };
 
 extern ActuatorManager actuators;

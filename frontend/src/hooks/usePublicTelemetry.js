@@ -16,7 +16,6 @@ function pointFromTelemetry(data) {
     timestamp: data.timestamp,
     temperature: data.temperature ?? null,
     humidity: data.humidity ?? null,
-    pressure: data.pressure ?? null,
     soil_a1: byId.A1 ?? null,
     soil_a2: byId.A2 ?? null,
     soil_a3: byId.A3 ?? null,
@@ -76,6 +75,23 @@ export function usePublicTelemetry() {
     ws.onmessage = event => {
       try {
         const message = JSON.parse(event.data)
+        if (message.type === 'actuator_state') {
+          const { actuator, state } = message.data || {}
+          if (actuator) {
+            setTelemetry(previous =>
+              previous
+                ? {
+                    ...previous,
+                    actuators: {
+                      ...(previous.actuators || {}),
+                      [actuator]: Boolean(state),
+                    },
+                  }
+                : previous
+            )
+          }
+          return
+        }
         if (message.type !== 'telemetry') return
         setTelemetry(previous => ({ ...(previous || {}), ...message.data }))
         setHistory(previous => [

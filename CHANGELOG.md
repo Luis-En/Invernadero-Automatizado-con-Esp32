@@ -28,6 +28,12 @@ All notable changes to this project. Format based on Keep a Changelog and
 
 ## [Unreleased]
 
+### Added
+
+- Real-time actuator state fan-out to every connected admin dashboard and
+  public visitor (`actuator_state` WebSocket event); the latest telemetry
+  snapshot is updated immediately after a confirmed manual command.
+
 ### Security
 
 - Login brute-force protection: persistent per-username and per-IP lockouts,

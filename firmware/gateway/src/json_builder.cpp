@@ -19,7 +19,7 @@ void telemetry(JsonDocument& doc, const TelemetryData& telemetry, const char* ti
   doc["timestamp"] = timestamp;
 
   // A value of exactly 0 is the on-wire sentinel for "no reading" (the field
-  // node has no BME280, or it failed). Emit null so the dashboard shows "no
+  // node has no DHT11, or it failed). Emit null so the dashboard shows "no
   // data" instead of a fake 0 C / 0 %.
   if (telemetry.temperature == 0.0f) {
     doc["temperature"] = nullptr;
@@ -30,11 +30,6 @@ void telemetry(JsonDocument& doc, const TelemetryData& telemetry, const char* ti
     doc["humidity"] = nullptr;
   } else {
     doc["humidity"] = round1(telemetry.humidity);
-  }
-  if (telemetry.pressure == 0.0f) {
-    doc["pressure"] = nullptr;
-  } else {
-    doc["pressure"] = round1(telemetry.pressure);
   }
 
   JsonArray soilAdc = doc.createNestedArray("soil_adc");
@@ -49,7 +44,6 @@ void telemetry(JsonDocument& doc, const TelemetryData& telemetry, const char* ti
   doc["fan_1_state"] = telemetry.actuators[ACT_FAN_1];
   doc["fan_2_state"] = telemetry.actuators[ACT_FAN_2];
   doc["humidifier_1_state"] = telemetry.actuators[ACT_HUMIDIFIER_1];
-  doc["humidifier_2_state"] = telemetry.actuators[ACT_HUMIDIFIER_2];
   doc["pump_state"] = telemetry.actuators[ACT_PUMP];
   doc["rssi"] = (int)telemetry.rssi;
   doc["device_id"] = telemetry.device_id[0] != '\0' ? telemetry.device_id : kDeviceIdField;

@@ -13,7 +13,7 @@ async def test_command_requires_login(client):
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("actuator", ["fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"])
+@pytest.mark.parametrize("actuator", ["fan_1", "fan_2", "humidifier_1", "pump"])
 @pytest.mark.parametrize("state", [True, False])
 async def test_command_ack(client, auth_admin, actuator, state):
     if actuator == "pump" and state:

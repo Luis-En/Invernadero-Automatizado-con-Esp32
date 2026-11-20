@@ -27,6 +27,6 @@ inline void delay(uint32_t) {}
 #ifndef FIELD_BENCH
 #define FIELD_BENCH 0
 #endif
-#ifndef FIELD_NO_BME280
-#define FIELD_NO_BME280 1
+#ifndef FIELD_NO_DHT
+#define FIELD_NO_DHT 1
 #endif

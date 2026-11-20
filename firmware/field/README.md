@@ -3,7 +3,7 @@
 > **The field node only speaks ESP-NOW** (optionally encrypted with PMK/LMK).
 > It never stores Wi-Fi router or broker credentials.
 
-Reads the 6 capacitive soil probes and the BME280, drives the 5 actuators and
+Reads the 6 capacitive soil probes and the DHT11, drives the 4 actuators and
 runs the automation/fail-safe loop. Because the control logic lives here, the
 greenhouse keeps working when the gateway or the Raspberry Pi go down: the last
 valid configuration is stored in NVS and reloaded on boot.
@@ -17,8 +17,8 @@ field/
 │   ├── config.h            # pins, timing, identity
 │   ├── config_model.h      # RuntimeConfig + JSON parsing + CRC
 │   ├── automation.h        # C++ port of backend/api/app/automation.py
-│   ├── sensors.h           # soil ADC + BME280
-│   ├── actuators.h         # 5 output pins
+│   ├── sensors.h           # soil ADC + DHT11
+│   ├── actuators.h         # 4 output pins
 │   ├── persistence.h       # NVS (Preferences) config + calibration
 │   ├── field_link.h        # ESP-NOW commands / telemetry / config push
 │   └── wifi_photo.h        # camera Wi-Fi AP -> ESP-NOW photo forwarding
@@ -37,8 +37,8 @@ The field firmware builds as two roles from the same sources:
 |---|---|---|
 | Device id | `field_primary` | `field_secondary` |
 | Soil probes | 2 on GPIO34, GPIO35 | 4 on GPIO32, GPIO33, GPIO34, GPIO35 |
-| BME280 | SCL GPIO32 / SDA GPIO33 | none |
-| Actuators | 2 fans (16/17) + 2 humidifiers (18/19) + pump (21) | none |
+| DHT11 | DATA GPIO32 | none |
+| Actuators | 2 fans (16/17) + humidifier (18) + pump (21) | none |
 | Camera AP | yes | no |
 | ESP-NOW | unicast to the gateway MAC once learned | same |
 
@@ -97,9 +97,9 @@ submerge it in water, wait, `CAL WET <slot>`; repeat for every slot; then
 | Function | GPIO | Notes |
 |----------|------|-------|
 | Soil A1 / A2 (primary) | 34 / 35 | ADC1 only (ADC2 is unusable with the radio) |
-| BME280 SDA / SCL | 33 / 32 | I2C |
+| DHT11 DATA | 32 | one-wire, 10k pull-up to 3.3 V |
 | Fan 1 / Fan 2 | 16 / 17 | relay, active high |
-| Humidifier 1 / 2 | 18 / 19 | MOSFET, active high |
+| Humidifier | 18 | MOSFET, active high |
 | Pump | 21 | relay/SSR, active high |
 | Camera link | Wi-Fi AP `invernadero-campo` | camera POSTs to `http://192.168.4.1/photo` |
 
@@ -116,7 +116,7 @@ pio run -e field              # compile for the real board
 pio run -e field -t upload    # flash
 pio device monitor            # 115200 baud
 
-pio run -e field_bench        # bench build: no BME280, synthetic temperature
+pio run -e field_bench        # bench build: no DHT11, synthetic temperature
 ```
 
 If PlatformIO is not on your PATH, the VS Code task **Firmware: build field**
@@ -143,7 +143,7 @@ bash tools/run_logic_tests.sh
    the pump on.
 3. **Hysteresis.** Each actuator has distinct ON/OFF thresholds, identical to
    the Python implementation in `backend/api/app/automation.py`.
-4. **Maximum ON time.** Fans/humidifiers 2 h and the pump 15 min by default,
+4. **Maximum ON time.** Fans/humidifier 2 h and the pump 15 min by default,
    configurable from the Pi inside `safety.max_on_seconds`.
 5. **Irrigation off by default.** The pump only runs when the config says
    `irrigation.enabled = true`.

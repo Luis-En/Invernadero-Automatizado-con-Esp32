@@ -8,14 +8,13 @@ import { IrrigationBanner } from '../components/IrrigationBanner'
 import { MultiChart } from '../components/Charts'
 import { api } from '../api'
 import { format } from 'date-fns'
-import { parseServerTime, formatServerTime } from '../utils/time'
+import { formatServerTime } from '../utils/time'
 
 export function Dashboard() {
   const { telemetry, history, status, error: telemetryError, refresh, historyHours, setTimeRange } = useTelemetry()
   const { isAdmin } = useAuth()
   const [actuatorLoading, setActuatorLoading] = useState(null)
   const [error, setError] = useState('')
-  const [confirmed, setConfirmed] = useState({})
   const [latestPhoto, setLatestPhoto] = useState(null)
 
   useEffect(() => {
@@ -39,10 +38,9 @@ export function Dashboard() {
     setActuatorLoading(actuator)
     setError('')
     try {
-      const ack = await api.adminControlActuator(actuator, newState)
-      setConfirmed(previous => ({ ...previous, [actuator]: {
-        state: ack.state, confirmedAt: Date.parse(ack.confirmed_at),
-      } }))
+      await api.adminControlActuator(actuator, newState)
+      // The backend updates the latest snapshot and broadcasts actuator_state;
+      // refresh covers a temporarily disconnected WebSocket.
       refresh()
     } catch (e) {
       console.error('Failed to toggle actuator:', e)
@@ -52,12 +50,8 @@ export function Dashboard() {
     }
   }, [isAdmin, refresh])
 
-  const actuatorState = name => {
-    const ack = confirmed[name]
-    const telemetryAt = parseServerTime(telemetry?.last_update || telemetry?.timestamp)?.getTime() || 0
-    return ack && !(telemetryAt > ack.confirmedAt)
-      ? ack.state : Boolean(telemetry?.actuators?.[name])
-  }
+  // The server is the single source of truth for every admin and visitor.
+  const actuatorState = name => Boolean(telemetry?.actuators?.[name])
 
   const soilOnThreshold = status?.soil_threshold_pct ?? 35
 
@@ -170,9 +164,6 @@ export function Dashboard() {
               {telemetry.temperature !== null ? telemetry.temperature.toFixed(1) : '—'}
               <span className="metric-unit">°C</span>
             </div>
-            <div className="metric-secondary">
-              {telemetry.pressure !== null ? `${telemetry.pressure.toFixed(1)} hPa` : ''}
-            </div>
           </div>
         </div>
 
@@ -243,8 +234,7 @@ export function Dashboard() {
         {[
           { name: 'Ventilador 1', icon: '💨', actuator: 'fan_1' },
           { name: 'Ventilador 2', icon: '💨', actuator: 'fan_2' },
-          { name: 'Humidificador 1', icon: '🌫️', actuator: 'humidifier_1' },
-          { name: 'Humidificador 2', icon: '🌫️', actuator: 'humidifier_2' },
+          { name: 'Humidificador', icon: '🌫️', actuator: 'humidifier_1' },
         ].map(a => (
           <ActuatorCard
             key={a.actuator}

@@ -51,13 +51,11 @@ TelemetryData Simulator::nextTelemetry() {
 
   temperature_ = clampf(temperature_ + uniform(-0.3f, 0.3f), 18.0f, 35.0f);
   humidity_ = clampf(humidity_ + uniform(-1.5f, 1.5f), 40.0f, 95.0f);
-  pressure_ = clampf(pressure_ + uniform(-0.5f, 0.5f), 990.0f, 1030.0f);
 
   TelemetryData telemetry;
   telemetry.epoch = 0;
   telemetry.temperature = temperature_;
   telemetry.humidity = humidity_;
-  telemetry.pressure = pressure_;
   telemetry.sequence = sequence_;
   telemetry.rssi = (int8_t)(-random(40, 86));
 
@@ -86,7 +84,6 @@ TelemetryData Simulator::nextTelemetry() {
   telemetry.actuators[ACT_FAN_1] = fan_on_;
   telemetry.actuators[ACT_FAN_2] = fan_on_;
   telemetry.actuators[ACT_HUMIDIFIER_1] = humidifier_on_;
-  telemetry.actuators[ACT_HUMIDIFIER_2] = humidifier_on_;
   telemetry.actuators[ACT_PUMP] = false;
   telemetry.device_id[0] = '\0';
   return telemetry;

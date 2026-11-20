@@ -177,10 +177,10 @@ en un despliegue nuevo se puede ejecutar como UID 1000 y hacer
 - Evento `AUTH_LOCKOUT` creado y visible en la API.
 - WebSocket conectado con cookie sin token en la URL.
 - Ruta de foto fuera del almacenamiento: `404`.
-- Tests backend: **126** (incluye lockout, SlowAPI, cookie, CSRF, IP, hashes legados,
+- Tests backend: **129** (incluye lockout, SlowAPI, cookie, CSRF, IP, hashes legados,
   endpoints públicos, roles admin/viewer y auditoría,
   fotos y cabeceras).
-- Tests frontend: **16**.
+- Tests frontend: **20**.
 
 ## 8. Checklist de despliegue
 

@@ -29,7 +29,7 @@ BASE_CONFIG = {
     "safety": {"max_on_seconds": {"fan": 7200, "humidifier": 7200, "pump": 900}},
 }
 
-OFF = {"fan_1": False, "fan_2": False, "humidifier_1": False, "humidifier_2": False, "pump": False}
+OFF = {"fan_1": False, "fan_2": False, "humidifier_1": False, "pump": False}
 
 
 def _run(temp, hum, soil, current=OFF, config=BASE_CONFIG, now=0.0, runtime=None, manual=None):
@@ -70,7 +70,7 @@ def test_fan_turns_off_below_off_threshold():
 
 def test_humidifier_turns_on_when_dry():
     states = _run(temp=25.0, hum=55.0, soil=50.0)
-    assert states["humidifier_1"] and states["humidifier_2"]
+    assert states["humidifier_1"]
 
 
 def test_pump_runs_when_soil_dry_and_irrigation_enabled():

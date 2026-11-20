@@ -23,8 +23,7 @@ function fmtPct(value, digits = 0) {
 const ACTUATORS = [
   { key: 'fan_1', name: 'Ventilador 1', icon: '💨' },
   { key: 'fan_2', name: 'Ventilador 2', icon: '💨' },
-  { key: 'humidifier_1', name: 'Humidificador 1', icon: '🌫️' },
-  { key: 'humidifier_2', name: 'Humidificador 2', icon: '🌫️' },
+  { key: 'humidifier_1', name: 'Humidificador', icon: '🌫️' },
   { key: 'pump', name: 'Bomba de riego', icon: '🚿' },
 ]
 

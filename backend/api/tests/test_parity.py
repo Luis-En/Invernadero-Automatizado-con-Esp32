@@ -22,7 +22,7 @@ CONFIG = {
 
 OFF = {
     "fan_1": False, "fan_2": False, "humidifier_1": False,
-    "humidifier_2": False, "pump": False,
+    "pump": False,
 }
 
 

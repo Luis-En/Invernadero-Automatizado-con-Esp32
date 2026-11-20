@@ -183,11 +183,11 @@ curl -s -X POST http://localhost:8000/api/notifications/test -H "Authorization: 
 # 3. Simular suelo seco (detén antes el serial-bridge para que no lo pise)
 curl -s -X POST http://localhost:8000/api/config/telemetry \
   -H "X-Device-Token: $DEVICE_API_TOKEN" -H "Content-Type: application/json" \
-  -d '{"timestamp":"2026-01-01T12:00:00Z","temperature":26,"humidity":70,"pressure":1013,
+  -d '{"timestamp":"2026-01-01T12:00:00Z","temperature":26,"humidity":70,
        "soil_adc":[2000,2000,2000,2000,2000,2000],
        "soil_pct":[15,16,17,14,15,16],"soil_ok":[true,true,true,true,true,true],
        "fan_1_state":false,"fan_2_state":false,"humidifier_1_state":false,
-       "humidifier_2_state":false,"pump_state":false,"rssi":-60,
+       "pump_state":false,"rssi":-60,
        "device_id":"field_esp32","sequence":999}'
 ```
 

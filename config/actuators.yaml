@@ -23,14 +23,7 @@ actuators:
     active_high: true
     type: "mosfet"
     max_on_seconds: 7200
-    description: "Humidificador 1 - 24VDC 800mA via MOSFET"
-
-  humidifier_2:
-    pin: 19
-    active_high: true
-    type: "mosfet"
-    max_on_seconds: 7200
-    description: "Humidificador 2 - 24VDC 800mA via MOSFET"
+    description: "Humidificador - 24VDC 800mA via MOSFET"
 
   pump:
     pin: 21

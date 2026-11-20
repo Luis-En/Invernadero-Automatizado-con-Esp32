@@ -51,7 +51,7 @@ static SensorSnapshot snapshot(float temp, float hum, float soil) {
 
 static bool run(RuntimeConfig& config, SensorSnapshot& sensors, ActuatorState& state,
                 uint32_t now_ms) {
-  bool manual[ACT_COUNT] = {false, false, false, false, false};
+  bool manual[ACT_COUNT] = {false, false, false, false};
   computeActuatorStates(config, sensors, state, now_ms, false, manual);
   return state.fan_1;
 }
@@ -80,7 +80,7 @@ int main() {
     ActuatorState state;
     SensorSnapshot dry = snapshot(25.0f, 55.0f, 30.0f);
     run(config, dry, state, 0);
-    EXPECT(state.humidifier_1 && state.humidifier_2, "humidifier on when dry");
+    EXPECT(state.humidifier_1, "humidifier on when dry");
     EXPECT(state.pump, "pump on when soil dry and irrigation enabled");
   }
 

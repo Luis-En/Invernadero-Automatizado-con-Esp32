@@ -13,7 +13,7 @@ from app.routes.actuators import perform_actuator_command
 
 router = APIRouter(prefix="/actuators", tags=["admin-actuators"])
 
-ActuatorName = Literal["fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"]
+ActuatorName = Literal["fan_1", "fan_2", "humidifier_1", "pump"]
 
 
 class AdminActuatorCommand(BaseModel):

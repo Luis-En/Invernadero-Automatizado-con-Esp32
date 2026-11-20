@@ -59,7 +59,6 @@ void handleTelemetry(const EspNowMessage& frame) {
   // Only report the sensors this bring-up build actually has.
   doc["temperature"] = (float)msg.temperature_c_x100 / 100.0f;
   doc["humidity"] = (float)msg.humidity_pct_x100 / 100.0f;
-  doc["pressure"] = (float)msg.pressure_hpa;
 
   JsonArray soil_adc = doc.createNestedArray("soil_adc");
   JsonArray soil_pct = doc.createNestedArray("soil_pct");
@@ -73,7 +72,6 @@ void handleTelemetry(const EspNowMessage& frame) {
   doc["fan_1_state"] = false;
   doc["fan_2_state"] = false;
   doc["humidifier_1_state"] = false;
-  doc["humidifier_2_state"] = false;
   doc["pump_state"] = false;
   doc["rssi"] = frame.rssi;
 

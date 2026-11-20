@@ -4,23 +4,20 @@
 
 #include "persistence.h"
 
-#if !FIELD_NO_BME280
-#include <Adafruit_BME280.h>
-#include <Wire.h>
+#if !FIELD_NO_DHT
+#include <DHT.h>
 #endif
 
 SensorManager sensors;
 
 // A probe that repeats the same value for kStuckSamples cycles is treated as
-// frozen. The epsilons are above normal ADC/LSB quantization but far below a
-// real environmental change over 80 s.
+// frozen. The epsilon is above normal ADC/LSB quantization but far below a
+// real soil moisture change over 80 s.
 static const float kSoilStuckEpsilon = 0.05f;
-static const float kTempStuckEpsilon = 0.02f;
-static const float kHumidityStuckEpsilon = 0.05f;
 
 namespace {
-#if !FIELD_NO_BME280
-Adafruit_BME280 bme;
+#if !FIELD_NO_DHT
+DHT dht(FIELD_DHT_PIN, FIELD_DHT_TYPE);
 #endif
 
 // Trimmed mean of a handful of ADC samples rejects a single bad conversion.
@@ -44,24 +41,6 @@ uint16_t readAdcAveraged(uint8_t pin) {
   return (uint16_t)(sum / SOIL_SAMPLES);
 }
 
-#if !FIELD_NO_BME280
-// Prints every device that answers on the I2C bus. Makes a mis-wired or
-// unpowered BME280 obvious on the serial console instead of a silent NaN.
-void scanI2cBus() {
-  Serial.println("[bme] I2C scan:");
-  uint8_t found = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("[bme]   device at 0x%02X\n", addr);
-      found++;
-    }
-  }
-  if (found == 0) {
-    Serial.println("[bme]   no devices found");
-  }
-}
-#endif
 }  // namespace
 
 void SensorManager::begin() {
@@ -69,45 +48,23 @@ void SensorManager::begin() {
   // explicitly keeps the calibration valid across core versions.
   analogSetAttenuation(ADC_11db);
 
-#if !FIELD_NO_BME280
-  // 6-pin BME280: strap it into I2C mode only if the breakout leaves CSB/SDO
-  // for the host to drive. A value of -1 means the board ties them itself.
-#if FIELD_BME280_CSB_PIN >= 0
-  pinMode(FIELD_BME280_CSB_PIN, OUTPUT);
-  digitalWrite(FIELD_BME280_CSB_PIN, HIGH);
-#endif
-#if FIELD_BME280_SDO_PIN >= 0
-  pinMode(FIELD_BME280_SDO_PIN, OUTPUT);
-  digitalWrite(FIELD_BME280_SDO_PIN, LOW);
-#endif
-  delay(5);
-
-  Wire.begin(FIELD_I2C_SDA, FIELD_I2C_SCL);
-  // Bound an I2C transaction so a wedged bus cannot stall the control loop.
-  Wire.setTimeOut(50);
-  delay(10);
-  scanI2cBus();
-  bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire) || bme.begin(0x77, &Wire);
-
-  if (!bme_present_) {
-    // SDA/SCL swapped is the most common wiring mistake. The BME280 is I2C
-    // only here (CSB/SDO are not driven), so retrying the other orientation
-    // costs nothing and saves a reflash.
-    Serial.println("[bme] not found, retrying with SDA/SCL swapped");
-    Wire.end();
-    Wire.begin(FIELD_I2C_SCL, FIELD_I2C_SDA);
-    delay(10);
-    scanI2cBus();
-    bme_present_ = bme.begin(FIELD_BME280_ADDR, &Wire) || bme.begin(0x77, &Wire);
-  }
-
-  if (bme_present_) {
-    bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                    Adafruit_BME280::SAMPLING_X2,
-                    Adafruit_BME280::SAMPLING_X16,
-                    Adafruit_BME280::SAMPLING_X1,
-                    Adafruit_BME280::FILTER_X16,
-                    Adafruit_BME280::STANDBY_MS_500);
+#if !FIELD_NO_DHT
+  dht.begin();
+  // The DHT11 needs about a second after power-up before it answers. Probe it
+  // once so a missing sensor is visible on the console at boot instead of only
+  // showing up as null telemetry later.
+  delay(1200);
+  const float probe_t = dht.readTemperature();
+  const float probe_h = dht.readHumidity();
+  dht_present_ = !isnan(probe_t) && !isnan(probe_h);
+  if (dht_present_) {
+    Serial.printf("[dht] ok on GPIO%d T=%.1fC H=%.0f%%\n", FIELD_DHT_PIN, probe_t,
+                  probe_h);
+  } else {
+    Serial.printf(
+        "[dht] no valid reading on GPIO%d (check 3.3 V, common GND, DATA and "
+        "the 10k pull-up)\n",
+        FIELD_DHT_PIN);
   }
 #endif
 
@@ -209,32 +166,22 @@ void SensorManager::read(SensorSnapshot& out) {
   out.soil_average = soilAverage(out.soil, SOIL_SENSOR_COUNT);
 
 #if FIELD_BENCH
-  // Bench build: no BME280 attached, synthesize plausible values.
+  // Bench build: no DHT11 attached, synthesize plausible values.
   out.temperature = 25.0f + (float)(millis() % 60000) / 60000.0f * 5.0f;
   out.humidity = 70.0f;
-  out.pressure = 1013.0f;
-#elif !FIELD_NO_BME280
-  if (bme_present_) {
-    out.temperature = bme.readTemperature();
-    out.humidity = bme.readHumidity();
-    out.pressure = bme.readPressure() / 100.0f;
-    if (isnan(out.temperature)) out.temperature = NAN;
-    if (isnan(out.humidity)) out.humidity = NAN;
-    if (isnan(out.pressure)) out.pressure = NAN;
-    if (updateStuck(temp_stuck_, out.temperature, kTempStuckEpsilon)) {
-      out.temperature = NAN;
-    }
-    if (updateStuck(humidity_stuck_, out.humidity, kHumidityStuckEpsilon)) {
-      out.humidity = NAN;
-    }
-    if (updateStuck(pressure_stuck_, out.pressure, 0.05f)) {
-      out.pressure = NAN;
-    }
-  } else {
-    out.temperature = NAN;
-    out.humidity = NAN;
-    out.pressure = NAN;
+#elif !FIELD_NO_DHT
+  // A failed read returns NaN from the library; propagate it so the automation
+  // fail-safe turns the humidifier off instead of trusting a bogus value.
+  const float temperature = dht.readTemperature();
+  const float humidity = dht.readHumidity();
+  out.temperature = isnan(temperature) ? NAN : temperature;
+  out.humidity = isnan(humidity) ? NAN : humidity;
+  if (!isnan(out.temperature) && !isnan(out.humidity)) {
+    dht_present_ = true;
   }
+#else
+  out.temperature = NAN;
+  out.humidity = NAN;
 #endif
 }
 

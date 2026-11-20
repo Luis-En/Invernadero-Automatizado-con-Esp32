@@ -51,13 +51,15 @@ enum CommandCode : uint8_t {
   CMD_SET_ACTUATOR = 7,
 };
 
+// One humidifier only: the greenhouse has a single misting unit. The index is
+// also the bit position in TelemetryMsg.actuator_mask and the value sent in
+// CMD_SET_ACTUATOR, so field and gateway must be flashed together.
 enum ActuatorIndex : uint8_t {
   ACT_FAN_1 = 0,
   ACT_FAN_2 = 1,
   ACT_HUMIDIFIER_1 = 2,
-  ACT_HUMIDIFIER_2 = 3,
-  ACT_PUMP = 4,
-  ACT_COUNT = 5,
+  ACT_PUMP = 3,
+  ACT_COUNT = 4,
 };
 
 static const uint8_t SOIL_SENSOR_COUNT = 6;
@@ -78,7 +80,6 @@ struct __attribute__((packed)) TelemetryMsg {
   uint32_t epoch;
   int16_t temperature_c_x100;
   uint16_t humidity_pct_x100;
-  uint16_t pressure_hpa;
   uint16_t soil_adc[SOIL_SENSOR_COUNT];
   uint8_t soil_pct[SOIL_SENSOR_COUNT];
   uint8_t soil_ok_mask;
@@ -137,7 +138,7 @@ struct __attribute__((packed)) EventMsg {
 };
 
 static_assert(sizeof(EspNowHeader) == 11, "EspNowHeader must be 11 bytes");
-static_assert(sizeof(TelemetryMsg) == 42, "TelemetryMsg must be 42 bytes");
+static_assert(sizeof(TelemetryMsg) == 40, "TelemetryMsg must be 40 bytes");
 static_assert(sizeof(PhotoChunkMsg) == 221, "PhotoChunkMsg must be 221 bytes");
 static_assert(sizeof(CommandMsg) == 185, "CommandMsg must be 185 bytes");
 static_assert(sizeof(AckMsg) == 17, "AckMsg must be 17 bytes");
@@ -157,7 +158,6 @@ struct TelemetryData {
   uint32_t epoch;
   float temperature;
   float humidity;
-  float pressure;
   SoilSample soil[SOIL_SENSOR_COUNT];
   bool actuators[ACT_COUNT];
   int8_t rssi;

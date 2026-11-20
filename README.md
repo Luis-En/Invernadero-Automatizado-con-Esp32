@@ -6,8 +6,8 @@ Sistema completo de monitoreo y automatización para invernadero 19m x 4m con Ra
 
 ```
 ESP32-CAM ──WiFi (AP del campo)──▶ ESP32 Campo primario ──ESP-NOW 50m──▶ ESP32 Gateway ──USB──▶ RPi5
-   captura JPEG                     2x suelo + BME280                     puente serial         │
-                                     5 actuadores + automatización                             ▼
+   captura JPEG                     2x suelo + DHT11                       puente serial         │
+                                     4 actuadores + automatización                             ▼
 ESP32 Campo secundario ──ESP-NOW──▶        │                              FastAPI + SQLite + React
    4x suelo extra                          └── el puente fusiona las 6 lecturas   (dashboard vía WebSocket)
 ```
@@ -22,13 +22,13 @@ llegan a la web en tiempo real.
 | Componente | Modelo | Especificación |
 |------------|--------|----------------|
 | Raspberry Pi | Pi 5 4GB + 64GB SD | Kit con cooler 27W |
-| ESP32 Campo | DevKit V1 | 6x ADC1, I2C, Wi-Fi (AP), 5 actuadores |
+| ESP32 Campo | DevKit V1 | 6x ADC1, Wi-Fi (AP), 4 actuadores |
 | ESP32 Gateway | DevKit V1 | Puente ESP-NOW ↔ USB Serial |
 | ESP32-CAM | OV2640 + 4MB PSRAM | Foto VGA c/30min vía Wi-Fi (AP del campo) |
 | Suelo (x6) | Capacitivo v1.2 | 3.3-5V, AOUT analógico |
-| Ambiente | BME280 | I2C, ±1°C, ±3% HR, 300-1100 hPa |
+| Ambiente | DHT11 | One-wire, ±2°C, ±5% HR, sin presión |
 | Ventiladores (x2) | 8" 35W 110VAC | Kemik Premiere |
-| Humidificadores (x2) | Ultrasónico 24VDC 800mA | Sumergible, 400ml/h, máx 10h/día |
+| Humidificador (x1) | Ultrasónico 24VDC 800mA | Sumergible, 400ml/h, máx 10h/día |
 | Bomba | 0.5HP 110VAC 35L/min | Celasa BOM01, ciclo 15min ON / 5min OFF |
 
 ## ⚡ Requisitos Eléctricos (Pendientes)
@@ -36,7 +36,7 @@ llegan a la web en tiempo real.
 > **IMPORTANTE**: El sistema simula todo sin hardware. Para producción necesitas:
 - Cable 12AWG 50m + breaker 15A + varistor para 110VAC
 - Contactor 20A para bomba (inrush 12-18A) - **no usar relé 10A**
-- SSR-40DA o MOSFET para humidificadores 24VDC
+- SSR-40DA o MOSFET para el humidificador 24VDC
 - Fuente 24VDC 3A + fuente 5VDC 3A para ESP32
 - Tinaco/reserva de agua + válvula pie + cebado
 - Pull-down de 10 kΩ en cada GPIO de relé y puesta a tierra única
@@ -158,7 +158,7 @@ comparte el driver ESP-NOW, el protocolo y el CRC16:
 
 | Nodo | Placa | Rol |
 |------|-------|-----|
-| `firmware/field` (primario) | ESP32 | 2 sondas + BME280, 5 actuadores, automatización, fail-safe y AP de cámara |
+| `firmware/field` (primario) | ESP32 | 2 sondas + DHT11, 4 actuadores, automatización, fail-safe y AP de cámara |
 | `firmware/field` (`field_secondary`) | ESP32 | 4 sondas extra; reenvía telemetría al gateway por ESP-NOW |
 | `firmware/gateway` | ESP32 | Puente ESP-NOW ↔ USB serial (telemetría, fotos y comandos) |
 | `firmware/camera` | ESP32-CAM | Captura JPEG periódica → Wi-Fi al nodo de campo |
@@ -411,7 +411,7 @@ las pruebas de lógica y compila los tres nodos en cada push.
 ## 📡 Protocolo ESP-NOW (Para firmware Fase 5)
 
 ```
-TELEMETRY: {ver, dev, seq, ts, soil[6]{adc,pct,ok}, bme{t,rh,p}, act[5], rssi}
+TELEMETRY: {ver, dev, seq, ts, soil[6]{adc,pct,ok}, dht{t,rh}, act[4], rssi}
 CMD: {set_config, timesync, reboot, purge}
 ACK/CHUNK: {seq, total, idx, crc16}
 ```
@@ -420,7 +420,10 @@ Gateway → Pi: JSON-lines + CRC16 a 115200 baudios por USB CDC.
 
 ## 🛑 Fail-Safe Implementado
 
-- Sensor inválido **o congelado** (varianza ~0 durante 8 muestras) → actuador OFF
+- Sensor inválido o fuera de rango → actuador relacionado OFF
+- Sonda de suelo congelada (varianza ~0 durante 8 muestras) → bomba OFF. El
+  DHT11 no usa detección de congelado: su resolución es 1 °C / 1 % HR y una
+  lectura repetida es normal
 - Histéresis obligatoria (no on/off simple)
 - `max_on_seconds` por actuador (bomba 900s, vent/hum 7200s); `0` significa
   "usar el default", nunca "ilimitado"
@@ -437,7 +440,7 @@ Gateway → Pi: JSON-lines + CRC16 a 115200 baudios por USB CDC.
 
 1. ~~Gateway ESP32 + bridge serial~~ (hecho: `firmware/gateway`, `backend/serial_bridge`)
 2. Implementar `firmware/field` con PlatformIO sobre `firmware/common`
-3. Drivers: BME280 I2C, 6x ADC1 capacitivo, UART CAM
+3. Drivers: DHT11, 6x ADC1 capacitivo, UART CAM
 4. NVS para config + calibración seco/húmedo por sensor
 5. HAL actuadores leyendo `actuators.yaml`
 6. Probar en banco sin 110V (LED en pines) → integrar

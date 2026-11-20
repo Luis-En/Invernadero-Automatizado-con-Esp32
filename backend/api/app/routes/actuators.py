@@ -10,12 +10,13 @@ from starlette.concurrency import run_in_threadpool
 from app.database import get_db
 from app.dependencies import get_admin_user
 from app.config import settings
-from app.models import ActiveConfig, ActuatorLog
+from app.models import ActiveConfig, ActuatorLog, Reading
 from app.serial_commands import send_command, CommandTimeout, CommandUnavailable, CommandRejected
 from app.rate_limit import limiter
+from app.realtime import broadcast_actuator_state
 
 router = APIRouter(prefix="/api/actuators", tags=["actuators"])
-ActuatorName = Literal["fan_1", "fan_2", "humidifier_1", "humidifier_2", "pump"]
+ActuatorName = Literal["fan_1", "fan_2", "humidifier_1", "pump"]
 
 
 class ActuatorCommand(BaseModel):
@@ -49,14 +50,39 @@ async def perform_actuator_command(actuator: str, state: bool, db: AsyncSession,
     except CommandTimeout as exc:
         raise HTTPException(504, str(exc)) from exc
 
+    confirmed_state = bool(ack.get("state", state)) if isinstance(ack, dict) else bool(state)
+    confirmed_at = datetime.now(timezone.utc).isoformat()
+
     # Every accepted manual command is auditable. Automatic decisions are
     # logged by the control loop; this covers the operator path.
     db.add(ActuatorLog(
         timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         actuator=actuator,
-        state=state,
+        state=confirmed_state,
         triggered_by="manual",
         reason=f"Comando manual confirmado por el dispositivo ({admin.username})",
     ))
+
+    # Keep the latest snapshot coherent for clients that reload before the next
+    # telemetry frame. History rows are not modified.
+    column = {
+        "fan_1": "fan_1_state",
+        "fan_2": "fan_2_state",
+        "humidifier_1": "humidifier_1_state",
+        "pump": "pump_state",
+    }.get(actuator)
+    if column:
+        latest_result = await db.execute(
+            select(Reading).order_by(desc(Reading.timestamp)).limit(1)
+        )
+        latest = latest_result.scalar_one_or_none()
+        if latest is not None:
+            setattr(latest, column, confirmed_state)
+
     await db.commit()
-    return {**ack, "confirmed_at": datetime.now(timezone.utc).isoformat()}
+
+    # Every connected admin and public visitor updates without waiting for the
+    # next sensor frame.
+    await broadcast_actuator_state(actuator, confirmed_state, source="manual")
+
+    return {**ack, "state": confirmed_state, "confirmed_at": confirmed_at}

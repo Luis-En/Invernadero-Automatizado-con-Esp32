@@ -72,7 +72,7 @@ suffix are accepted for manual debugging.
 | `type` | Purpose | Fields |
 |--------|---------|--------|
 | `hello` | Boot and `ping` reply | `role`, `device_id`, `firmware`, `protocol`, `uptime_s`, `config_version`, `time_synced`, `simulate` |
-| `telemetry` | Field reading, ready to POST to `/api/config/telemetry` | `timestamp`, `temperature`, `humidity`, `pressure`, `soil_adc[6]`, `soil_pct[6]`, `soil_ok[6]`, `fan_1_state`, `fan_2_state`, `humidifier_1_state`, `humidifier_2_state`, `pump_state`, `rssi`, `device_id`, `sequence` |
+| `telemetry` | Field reading, ready to POST to `/api/config/telemetry` | `timestamp`, `temperature`, `humidity`, `soil_adc[6]`, `soil_pct[6]`, `soil_ok[6]`, `fan_1_state`, `fan_2_state`, `humidifier_1_state`, `pump_state`, `rssi`, `device_id`, `sequence` |
 | `photo_chunk` | Camera chunk, ready to POST to `/api/photos/chunk` | `sequence`, `total_chunks`, `chunk_index`, `crc16`, `data` (hex), `device_id` |
 | `device_status` | Heartbeat every 30s | `field_online`, `camera_online`, `field_rssi`, `camera_rssi`, `field_last_seen_s`, `camera_last_seen_s`, `config_version`, `uptime_s`, `free_heap`, `simulate` |
 | `event` | Watchdog and fault notifications | `severity`, `code`, `message`, `timestamp` |

@@ -7,7 +7,7 @@ Raspberry Pi (o al PC), que las guarda y las muestra en la web.
 ```
 ESP32-CAM ──WiFi (AP del campo)──▶ ESP32 CAMPO ──ESP-NOW──▶ ESP32 GATEWAY ──USB──▶ Raspberry Pi
    │                                   │                                                  │
- captura JPEG                   6 sensores + BME280                               FastAPI + WebSocket
+ captura JPEG                   6 sensores + DHT11                                FastAPI + WebSocket
                                  automatización                                    Dashboard en tiempo real
 ```
 
@@ -82,6 +82,20 @@ CAL SAVE          # guardar en NVS
 ```
 
 En el secundario están cableados los slots 0–3 (GPIO32, 33, 34, 35).
+
+### DHT11 (temperatura y humedad ambiental)
+
+| DHT11 | ESP32 campo |
+|-------|-------------|
+| VCC | 3V3 |
+| GND | GND (común con la ESP32) |
+| DATA | GPIO32 |
+
+El DHT11 usa un solo cable de datos y no tiene barómetro, así que el sistema no
+publica presión. Si el módulo no trae resistencia de pull-up, añade una de
+10 kΩ entre DATA y 3V3. Al arrancar, el monitor debe mostrar
+`[dht] ok on GPIO32 T=..C H=..%`; si dice `no valid reading`, revisa
+alimentación, GND común y el pull-up.
 
 ---
 

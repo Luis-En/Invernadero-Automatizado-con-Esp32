@@ -6,7 +6,6 @@ TELEMETRY = {
     "timestamp": datetime.utcnow().isoformat() + "Z",
     "temperature": 25.0,
     "humidity": 70.0,
-    "pressure": 1013.0,
     "soil_adc": [2000] * 6,
     "soil_pct": [50.0] * 6,
     "soil_ok": [True] * 6,

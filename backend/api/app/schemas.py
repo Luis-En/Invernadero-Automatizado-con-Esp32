@@ -305,14 +305,12 @@ class TelemetryPayload(BaseModel):
     timestamp: datetime
     temperature: Optional[float] = Field(None, ge=-40.0, le=80.0)
     humidity: Optional[float] = Field(None, ge=0.0, le=100.0)
-    pressure: Optional[float] = Field(None, ge=300.0, le=1100.0)
     soil_adc: List[int] = Field(default_factory=lambda: [0] * 6)
     soil_pct: List[float] = Field(default_factory=lambda: [0.0] * 6)
     soil_ok: List[bool] = Field(default_factory=lambda: [False] * 6)
     fan_1_state: bool = False
     fan_2_state: bool = False
     humidifier_1_state: bool = False
-    humidifier_2_state: bool = False
     pump_state: bool = False
     rssi: Optional[int] = Field(None, ge=-120, le=10)
     device_id: Optional[str] = Field(None, max_length=50)
@@ -374,14 +372,12 @@ class ReadingBase(BaseModel):
     timestamp: datetime
     temperature: Optional[float] = None
     humidity: Optional[float] = None
-    pressure: Optional[float] = None
     soil_adc: List[int] = Field(default_factory=lambda: [0]*6)
     soil_pct: List[float] = Field(default_factory=lambda: [0.0]*6)
     soil_ok: List[bool] = Field(default_factory=lambda: [True]*6)
     fan_1_state: bool = False
     fan_2_state: bool = False
     humidifier_1_state: bool = False
-    humidifier_2_state: bool = False
     pump_state: bool = False
     rssi: Optional[int] = None
     device_id: Optional[str] = None
@@ -476,7 +472,6 @@ class TelemetrySnapshot(BaseModel):
     timestamp: datetime
     temperature: Optional[float] = None
     humidity: Optional[float] = None
-    pressure: Optional[float] = None
     soil_sensors: List[dict] = Field(default_factory=list)
     soil_avg_row_a: Optional[float] = None
     soil_avg_row_b: Optional[float] = None
@@ -647,7 +642,6 @@ class PublicTelemetry(BaseModel):
     last_update: datetime
     temperature: Optional[float] = None
     humidity: Optional[float] = None
-    pressure: Optional[float] = None
     soil_sensors: List[PublicSoilSensor] = Field(default_factory=list)
     soil_avg_row_a: Optional[float] = None
     soil_avg_row_b: Optional[float] = None

@@ -74,16 +74,13 @@ void FieldLink::sendTelemetry(const TelemetryData& telemetry) {
 
   // NaN/Inf must never be cast to an integer: lroundf(NAN) is undefined and
   // produced garbage such as 0xFFFF on the wire. Emit 0 for missing readings;
-  // the consumer treats 0 as "no data" for temperature/humidity/pressure.
+  // the consumer treats 0 as "no data" for temperature and humidity.
   msg.temperature_c_x100 = isnan(telemetry.temperature) || isinf(telemetry.temperature)
                                ? 0
                                : (int16_t)lroundf(telemetry.temperature * 100.0f);
   msg.humidity_pct_x100 = isnan(telemetry.humidity) || isinf(telemetry.humidity)
                               ? 0
                               : (uint16_t)lroundf(telemetry.humidity * 100.0f);
-  msg.pressure_hpa = isnan(telemetry.pressure) || isinf(telemetry.pressure)
-                         ? 0
-                         : (uint16_t)lroundf(telemetry.pressure);
 
   for (uint8_t i = 0; i < SOIL_SENSOR_COUNT; i++) {
     msg.soil_adc[i] = telemetry.soil[i].adc;

@@ -14,7 +14,6 @@ function wsPayloadToHistoryPoint(data) {
     timestamp: data.timestamp,
     temperature: data.temperature ?? null,
     humidity: data.humidity ?? null,
-    pressure: data.pressure ?? null,
     soil_a1: adc[0] ?? null,
     soil_a2: adc[1] ?? null,
     soil_a3: adc[2] ?? null,
@@ -24,9 +23,54 @@ function wsPayloadToHistoryPoint(data) {
     fan_1: data.fan_1_state ?? false,
     fan_2: data.fan_2_state ?? false,
     humidifier_1: data.humidifier_1_state ?? false,
-    humidifier_2: data.humidifier_2_state ?? false,
     pump: data.pump_state ?? false,
   }
+}
+
+// The admin WebSocket sends the raw device payload (fan_1_state, soil_pct…);
+// the REST snapshot exposes nested actuators/soil_sensors. Normalize both so
+// every admin sees actuator and sensor changes without waiting for the poll.
+function mergeWsTelemetry(previous, data) {
+  const next = { ...(previous || {}), ...data }
+  const actuatorData =
+    data.actuators ||
+    (data.fan_1_state !== undefined
+      ? {
+          fan_1: Boolean(data.fan_1_state),
+          fan_2: Boolean(data.fan_2_state),
+          humidifier_1: Boolean(data.humidifier_1_state),
+          pump: Boolean(data.pump_state),
+        }
+      : null)
+  if (actuatorData) next.actuators = actuatorData
+
+  if (Array.isArray(data.soil_pct)) {
+    const ids = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3']
+    const ok = Array.isArray(data.soil_ok) ? data.soil_ok : []
+    next.soil_sensors = ids.map((id, index) => ({
+      id,
+      pct: data.soil_pct[index] ?? null,
+      ok: index < ok.length ? Boolean(ok[index]) : false,
+      row: id[0],
+    }))
+    const valid = next.soil_sensors.filter(
+      sensor => sensor.ok && sensor.pct !== null && sensor.pct !== undefined
+    )
+    next.soil_avg_general = valid.length
+      ? valid.reduce((sum, sensor) => sum + sensor.pct, 0) / valid.length
+      : null
+    const rowAverage = row => {
+      const values = valid.filter(sensor => sensor.row === row).map(s => s.pct)
+      return values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null
+    }
+    next.soil_avg_row_a = rowAverage('A')
+    next.soil_avg_row_b = rowAverage('B')
+  }
+
+  if (data.timestamp && !data.last_update) next.last_update = data.timestamp
+  return next
 }
 
 export function TelemetryProvider({ children }) {
@@ -96,9 +140,24 @@ export function TelemetryProvider({ children }) {
       try {
         const message = JSON.parse(event.data)
         if (message.type === 'telemetry') {
-          setTelemetry(prev => ({ ...(prev || {}), ...message.data }))
+          setTelemetry(prev => mergeWsTelemetry(prev, message.data))
           const point = wsPayloadToHistoryPoint(message.data)
           setHistory(prev => [...prev.slice(-499), point])
+        } else if (message.type === 'actuator_state') {
+          const { actuator, state } = message.data || {}
+          if (actuator) {
+            setTelemetry(prev =>
+              prev
+                ? {
+                    ...prev,
+                    actuators: {
+                      ...(prev.actuators || {}),
+                      [actuator]: Boolean(state),
+                    },
+                  }
+                : prev
+            )
+          }
         } else if (message.type === 'config_update' || message.type === 'config_confirmed' ||
                    message.type === 'event') {
           fetchLatest()

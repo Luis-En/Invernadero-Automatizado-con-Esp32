@@ -16,7 +16,7 @@ vi.mock('../hooks/usePublicTelemetry', () => ({
         { id: 'A1', pct: 45, ok: true, row: 'A' },
         { id: 'B1', pct: 40, ok: true, row: 'B' },
       ],
-      actuators: { fan_1: false, fan_2: false, humidifier_1: false, humidifier_2: false, pump: false },
+      actuators: { fan_1: false, fan_2: false, humidifier_1: false, pump: false },
       irrigation_enabled: false,
       irrigation_needed: false,
       active_crop: 'Tomate',

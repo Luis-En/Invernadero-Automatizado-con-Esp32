@@ -6,7 +6,8 @@
 #include "config.h"
 #include "config_model.h"
 
-// Reads the 6 capacitive soil probes on ADC1 and the BME280 over I2C.
+// Reads the 6 capacitive soil probes on ADC1 and the DHT11 on a single data
+// pin. The DHT11 reports whole-degree temperature and 1 % humidity.
 //
 // Soil calibration: the sensors output a voltage that rises as the soil dries
 // (and reads fall as it gets wet). Each probe stores a dry and a wet ADC value
@@ -36,15 +37,16 @@ class SensorManager {
   // CAL DRY/WET commands to capture a calibration point.
   uint16_t sampleRaw(uint8_t index);
 
-  // BME280 presence is detected at begin(); when absent readings are NAN.
-  bool bmePresent() const { return bme_present_; }
+  // DHT11 presence is detected at begin(); when absent readings are NAN.
+  bool dhtPresent() const { return dht_present_; }
 
  private:
   float readSoilPercent(uint8_t index, uint16_t adc) const;
 
   // Rolling window used to detect a frozen probe. A connected probe that
   // stops changing is more dangerous than a disconnected one because it still
-  // reports a plausible value.
+  // reports a plausible value. Only applied to the soil probes: the DHT11 has
+  // 1-degree / 1 % resolution, so a repeated ambient reading is normal.
   static const uint8_t kStuckSamples = 8;
   struct StuckWindow {
     float samples[kStuckSamples] = {0};
@@ -58,10 +60,7 @@ class SensorManager {
       SOIL_PIN_A1, SOIL_PIN_A2, SOIL_PIN_A3, SOIL_PIN_B1, SOIL_PIN_B2, SOIL_PIN_B3};
   Calibration calibration_[SOIL_SENSOR_COUNT];
   StuckWindow soil_stuck_[SOIL_SENSOR_COUNT];
-  StuckWindow temp_stuck_;
-  StuckWindow humidity_stuck_;
-  StuckWindow pressure_stuck_;
-  bool bme_present_ = false;
+  bool dht_present_ = false;
 };
 
 extern SensorManager sensors;

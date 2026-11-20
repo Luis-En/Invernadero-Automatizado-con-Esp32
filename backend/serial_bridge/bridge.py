@@ -144,14 +144,12 @@ class SerialBridge:
             "timestamp": telemetry.timestamp,
             "temperature": telemetry.temperature,
             "humidity": telemetry.humidity,
-            "pressure": telemetry.pressure,
             "soil_adc": [sensor["adc"] for sensor in telemetry.soil_sensors],
             "soil_pct": [sensor["pct"] for sensor in telemetry.soil_sensors],
             "soil_ok": [sensor["ok"] for sensor in telemetry.soil_sensors],
             "fan_1_state": telemetry.actuators["fan_1"],
             "fan_2_state": telemetry.actuators["fan_2"],
             "humidifier_1_state": telemetry.actuators["humidifier_1"],
-            "humidifier_2_state": telemetry.actuators["humidifier_2"],
             "pump_state": telemetry.actuators["pump"],
             "rssi": telemetry.rssi,
             "device_id": telemetry.device_id,
@@ -287,7 +285,7 @@ class SerialBridge:
     async def _handle_field_telemetry(self, message: dict) -> None:
         """Merge the two field nodes into one reading.
 
-        The primary owns the BME280, the actuators and two probes (GPIO34/35).
+        The primary owns the DHT11, the actuators and two probes (GPIO34/35).
         The secondary owns four probes (GPIO32-35). Posting a merged payload
         keeps the backend's 6-slot soil model and the dashboard unchanged.
         """
@@ -323,14 +321,12 @@ class SerialBridge:
             "timestamp": primary.get("timestamp") or secondary.get("timestamp"),
             "temperature": primary.get("temperature"),
             "humidity": primary.get("humidity"),
-            "pressure": primary.get("pressure"),
             "soil_adc": [p_adc[0], p_adc[1], s_adc[0], s_adc[1], s_adc[2], s_adc[3]],
             "soil_pct": [p_pct[0], p_pct[1], s_pct[0], s_pct[1], s_pct[2], s_pct[3]],
             "soil_ok": [p_ok[0], p_ok[1], s_ok[0], s_ok[1], s_ok[2], s_ok[3]],
             "fan_1_state": primary.get("fan_1_state", False),
             "fan_2_state": primary.get("fan_2_state", False),
             "humidifier_1_state": primary.get("humidifier_1_state", False),
-            "humidifier_2_state": primary.get("humidifier_2_state", False),
             "pump_state": primary.get("pump_state", False),
             "rssi": primary.get("rssi"),
             "device_id": "field_primary",
